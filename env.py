@@ -18,6 +18,8 @@ class Environment:
         self.agents = agents
         self.corridors = corridors
         self.corridor_direction_defaults = [corridor.reverse for corridor in self.corridors]
+        self.highway_type = "none"
+        self.set_highway_type("none")
         
         # log init
         self.spaces = []
@@ -43,15 +45,17 @@ class Environment:
         for agent in self.agents.values():
             goal = self.spaces.pop(0)
             agent.goal = Location(goal[0], goal[1])
+
+        self.reset_corridors()
             
         self.agent_history = make_default_agent_history(self.agents)
         self.agent_goal = make_default_agent_goal(self.agents)
         self.corridor_direction = make_default_corridor_direction(self.corridors)
 
-        for corridor in self.corridors:
-            corridor.reverse = False
-
-        self.map.fit_corridors(self.corridors)
+        if self.highway_type == "strict":
+            self.mapf_solver.map.fit_corridors(self.corridors)
+        else:
+            self.map.reset()
 
     def reset_corridors(self):
         for corridor, direction in zip(self.corridors, self.corridor_direction_defaults):
@@ -67,21 +71,20 @@ class Environment:
                 return idx
         return None
     
-    def step(self, time_step=0, reset_corridor=None):
-        update_agent_goal_dict(self.agents, self.agent_goal, time_step)
-
-        instructions = None
-
-        # set direction of corridors as the setting of input file
-        if reset_corridor == "highway":
+    def set_highway_type(self, highway_type="strict"):
+        assert(highway_type=="strict" or highway_type=="soft" or highway_type=="none")
+        self.highway_type = highway_type
+        if self.highway_type == "strict":
             self.reset_corridors()
             self.mapf_solver.map.fit_corridors(self.corridors)
-            update_agent_corridor_direction(self.corridors, self.corridor_direction, time_step)
-            solution, reach_nodes, expand_nodes = self.mapf_solver.search(self.agents, return_info=True) 
         else:
             self.map.reset()
-            update_agent_corridor_direction(self.corridors, self.corridor_direction, time_step)
-            solution, reach_nodes, expand_nodes = self.mapf_solver.search(self.agents, return_info=True)
+    
+    def step(self, time_step=0):
+        update_agent_goal_dict(self.agents, self.agent_goal, time_step)
+
+        update_agent_corridor_direction(self.corridors, self.corridor_direction, time_step)
+        solution, reach_nodes, expand_nodes = self.mapf_solver.search(self.agents, return_info=True) 
 
         for agent_name, history in solution.items():
             state_plus_time_offset(history, time_step, sub_state_at_time_zero=True)
@@ -104,9 +107,9 @@ class Environment:
         self.total_forward_distance += forward_distance
 
         no_solution_in_time = False if solution else True
-        return finished_tasks, forward_distance, instructions, no_solution_in_time, reach_nodes, expand_nodes
+        return finished_tasks, forward_distance, no_solution_in_time, reach_nodes, expand_nodes
      
-    def output_yaml_history(self, directory: Str, output_filename: Str, output_corridor_direction:bool=True):
+    def output_yaml_history(self, directory: Str, output_filename: Str):
         # Output History
         agent_history = self.agent_history
         agent_goal = self.agent_goal
@@ -121,7 +124,7 @@ class Environment:
         output["tasks"] = self.total_finished_tasks
         output["schedule"] = agent_history
         output["goal"] = agent_goal
-        if output_corridor_direction:
+        if not self.highway_type == "none":
             output["direction"] = self.corridor_direction
 
         if not os.path.exists(directory):

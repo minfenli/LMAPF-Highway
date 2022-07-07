@@ -45,7 +45,7 @@ class TestParameter:
             return f.read()
 
 def test_without_control(
-    env: Environment, episode_reset_seed=0, n_iterations=50, no_highway=False, output=False
+    env: Environment, episode_reset_seed=0, n_iterations=50, output=False
 ):
     test_reward = 0
     test_reach_nodes = 0
@@ -55,13 +55,11 @@ def test_without_control(
 
     time_start = time()
     for iteration in range(n_iterations):
-        finished_tasks, forward_distance, instruction, no_solution_in_time, reach_nodes, expand_nodes  = env.step(
-            iteration * env.mapf_solver.buffer_size + 1,
-            reset_corridor=None if no_highway else "highway",
+        finished_tasks, forward_distance, no_solution_in_time, reach_nodes, expand_nodes  = env.step(
+            iteration * env.mapf_solver.buffer_size + 1
         )
         if no_solution_in_time:
             return False
-        # finished_tasks, forward_distance, instruction = env.simple_step(iteration*env.mapf_solver.buffer_size+1, reset_corridor="instruction")
         test_reward += finished_tasks
         test_reach_nodes += reach_nodes
         test_expand_nodes += expand_nodes
@@ -73,7 +71,7 @@ def test_without_control(
     if output:
         # Output History
         env.output_yaml_history(
-            "history", "episode" + str(episode_reset_seed) + "_output.yaml", not no_highway
+            "history", "episode" + str(episode_reset_seed) + "_output.yaml"
         )
 
     return test_reward, test_computing_time, test_reach_nodes, test_expand_nodes
@@ -84,12 +82,8 @@ def init_worker(args):
 
 def job(args):
     global env
-    (episode_reset_seed, control_type) = args
-    if control_type == "highway":
-        results = test_without_control(env, episode_reset_seed, no_highway=False, output=True)
-    else:
-        results = test_without_control(env, episode_reset_seed, no_highway=True, output=False)
-
+    episode_reset_seed = args[0]
+    results = test_without_control(env, episode_reset_seed, output=True)
     return results
 
 class Worker:
@@ -102,10 +96,9 @@ class Worker:
         print("Make Workers", num_workers)
         return pool
 
-    def work(self, i_episodes, control_type):
+    def work(self, i_episodes):
         episode_reset_seeds = [i for i in range(i_episodes)]
-        control_types = [control_type for _ in range(i_episodes)]
-        work_results = self.pool.map(job, zip(episode_reset_seeds, control_types))
+        work_results = self.pool.map(job, zip(episode_reset_seeds))
         rewards, computing_times, fail_cases, reach_nodes, expand_nodes = self.make_results(work_results)
         success_cases = i_episodes - fail_cases
         avg_reward, avg_computing_time = 0 if not success_cases else sum(rewards)/success_cases, 0 if not success_cases else sum(computing_times)/success_cases
@@ -132,7 +125,7 @@ class Worker:
         return test_rewards, test_computing_times, fail_cases, test_reach_nodes, test_expand_nodes
 
 
-def test(params: TestParameter, control_type, test_episodes, use_highway_heuristic, highway_heuristic_setup=None):
+def test(params: TestParameter, highway_type, test_episodes, use_highway_heuristic, highway_heuristic_setup=None):
     grid_map, corridor_params = make_map(params.x_len, params.y_len, params.x_num, params.y_num, True, params.line_num, params.pad_num, params.only_one_line, params.only_allow_main_direction)
     corridors = []
     for corridor in corridor_params:
@@ -167,18 +160,15 @@ def test(params: TestParameter, control_type, test_episodes, use_highway_heurist
         mapf_solver = PBS(grid_map, params.window_size, params.buffer_size, False, corridors if use_highway_heuristic else [], highway_heuristic_setup)
         mapf_solver.plan_full_paths = params.plan_full_path
 
-    
-
-    if control_type == "highway":
-        mapf_solver.map.fit_corridors(corridors)
-
     X = "X"
     N = "N"
     env = Environment(
-        f"test_diff_highway_w_{params.solver_type}_{params.x_len}_{params.y_len}_{params.x_num}_{params.y_num}_{params.line_num}_{params.pad_num}_a{len(agents)}_window{params.window_size if not params.window_size==10e10 else X}_{control_type}_w{highway_heuristic_setup if not highway_heuristic_setup==None else N}" + ("_only_one_line" if params.only_one_line else ""), [grid_map.dimension[0], grid_map.dimension[1]], mapf_solver, agents, corridors, 1
+        f"test_diff_highway_w_{params.solver_type}_{params.x_len}_{params.y_len}_{params.x_num}_{params.y_num}_{params.line_num}_{params.pad_num}_a{len(agents)}_window{params.window_size if not params.window_size==10e10 else X}_{highway_type}_w{highway_heuristic_setup if not highway_heuristic_setup==None else N}" + ("_only_one_line" if params.only_one_line else ""), [grid_map.dimension[0], grid_map.dimension[1]], mapf_solver, agents, corridors
     )
+    env.set_highway_type(highway_type)
+
     workers = Worker(params.worker_num, env)
-    avg_reward, avg_computing_time, fail_cases, reach_nodes, expand_nodes = workers.work(test_episodes, control_type)
+    avg_reward, avg_computing_time, fail_cases, reach_nodes, expand_nodes = workers.work(test_episodes)
     print(reach_nodes, expand_nodes)
 
     # params.save_result("./test/", (str(avg_reward) + " " + str(avg_computing_time) + "\n")
@@ -301,14 +291,14 @@ def test_diff_highway_w(params: TestParameter, range_iter, test_episodes = 10, o
 
     for highway_w in range_iter:
 
-        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "nolimit", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "soft", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
         avg_finished_tasks["nolimit(Soft Limit)"].append(task_num)
         avg_computing_time["nolimit(Soft Limit)"].append(time_compute)
         fail_case["nolimit(Soft Limit)"].append(fail_cases)
         reach_nodes_list["nolimit(Soft Limit)"].append(reach_nodes)
         expand_nodes_list["nolimit(Soft Limit)"].append(expand_nodes)
 
-        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "highway", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
         avg_finished_tasks["highway(Strict Limit)"].append(task_num)
         avg_computing_time["highway(Strict Limit)"].append(time_compute)
         fail_case["highway(Strict Limit)"].append(fail_cases)
@@ -317,7 +307,7 @@ def test_diff_highway_w(params: TestParameter, range_iter, test_episodes = 10, o
 
         params.plan_full_path = False
         
-        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "highway", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
         avg_finished_tasks["highway(Strict Limit, Partial Plan)"].append(task_num)
         avg_computing_time["highway(Strict Limit, Partial Plan)"].append(time_compute)
         fail_case["highway(Strict Limit, Partial Plan)"].append(fail_cases)
@@ -385,7 +375,7 @@ def test_highway(params: TestParameter, test_episodes = 10, output_path = None):
     agent_nums = []
     agent_ratios = []
 
-    task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "highway", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+    task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
     avg_finished_tasks["highway(Strict Limit)"].append(task_num)
     avg_computing_time["highway(Strict Limit)"].append(time_compute)
     fail_case["highway(Strict Limit)"].append(fail_cases)
@@ -513,9 +503,9 @@ def main():
 
     x_len = 2
     y_len = 2
-    x_num = 3
-    y_num = 3
-    agent_num = 10
+    x_num = 5
+    y_num = 5
+    agent_num = 25
     solver = "PBS"
 
     line_num = 1
@@ -524,6 +514,10 @@ def main():
     only_allow_main_direction = False
 
     X = "X"
+
+    params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, WORKER_NUM, True, only_one_line, only_allow_main_direction)
+    OUTPUT = f"./test/test.csv"
+    test_diff_highway_w(params, [1, 1.2, 1.5, 2, 5, 10, 20, 50, 0], output_path = OUTPUT)
 
     # density = 0.15
     # for only_one_line in [False]:
@@ -542,11 +536,11 @@ def main():
     #         OUTPUT = f"/media/NFS/fong/KIva-System-RL/test/test_diff_highway_w_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a{agent_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
     #         test_diff_highway_w(params, [1, 1.2, 1.5, 2, 5, 10, 20, 50, 0], output_path = OUTPUT)
     # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, WORKER_NUM, True)
-    for agent_num in [10]:
-        # OUTPUT = f"/media/NFS/fong/KIva-System-RL/test/test_highway_w_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a{agent_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ("_only_allow_main_direction" if only_allow_main_direction else "") + ".csv"
-        OUTPUT = f"./test/test.csv"
-        params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, WORKER_NUM, plan_full_path, only_one_line, only_allow_main_direction)
-        test_highway(params, output_path = OUTPUT)
+    # for agent_num in [10]:
+    #     # OUTPUT = f"/media/NFS/fong/KIva-System-RL/test/test_highway_w_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a{agent_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ("_only_allow_main_direction" if only_allow_main_direction else "") + ".csv"
+    #     OUTPUT = f"./test/test.csv"
+    #     params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, WORKER_NUM, plan_full_path, only_one_line, only_allow_main_direction)
+    #     test_highway(params, output_path = OUTPUT)
     # test_diff_highway_w(params, [1, 1.2, 1.5, 2, 5, 10, 20, 50, 0], output_path = OUTPUT)
 
     # test_diff_agent_num(params, [5, 8, 10], output_path = OUTPUT)
