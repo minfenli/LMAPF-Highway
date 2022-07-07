@@ -190,30 +190,17 @@ class Priorities:
 #             self.list.append(node)
 
 class PBS:
-    def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, init_corridor_for_heuristic=[], highway_w=None):
+    def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, heuristic_distance_map=None, abstract_distance_map=None):
         self.map = map
         self.window_size = window_size
         self.buffer_size = buffer_size
         self.plan_full_paths = True
         self.search = self.search_set
         self.use_manhat = use_manhat
-        if(not self.use_manhat):
-            s = time.time()
-            self.highway_w = highway_w
-            if init_corridor_for_heuristic:
-                self.map.fit_corridors(init_corridor_for_heuristic)
-                self.distance_map = self.map.get_distance_map(self.highway_w)
-                # if self.highway_w:
-                #     self.map.reset()
-                self.map.reset()
-            else:
-                self.distance_map = self.map.get_distance_map()
-            print("Finish Heuristic Map in", time.time() - s, "s")
+        self.heuristic_distance_map = heuristic_distance_map # Valid if "use_manhat is False"
+        self.abstract_distance_map = abstract_distance_map   # Valid if "use_manhat is False"
             # for i in self.distance_map[:][::-1][0][0]: print(i)
             # import pdb; pdb.set_trace()
-    
-    def recompute_distance_map(self):
-        self.distance_map = self.map.get_distance_map()
         
     def search_stack(self, agents, time_limit=600, return_info=False):
         reach_nodes = 0
@@ -449,7 +436,7 @@ class PBS:
         if is_goal:
             return state.location.x >= 0 and state.location.x < self.map.dimension[0] \
                 and state.location.y >= 0 and state.location.y < self.map.dimension[1] \
-                and location_in_vertex_constraint_after_time(constraints, state) \
+                and self.location_in_vertex_constraint_after_time(constraints, state) \
                 and not self.map.grid[state.location.y][state.location.x].grid_property.is_obstacle
         else:
             return state.location.x >= 0 and state.location.x < self.map.dimension[0] \
@@ -464,15 +451,15 @@ class PBS:
         if(self.use_manhat):
             return fabs(state.location.x - agent.goal.x) + fabs(state.location.y - agent.goal.y)
         else:
-            return self.distance_map[state.location.y][state.location.x][agent.goal.y][agent.goal.x]
+            return self.heuristic_distance_map[state.location.y][state.location.x][agent.goal.y][agent.goal.x]
     
     def get_agent_forward_distance(self, new_location, agent):
         if(self.use_manhat):
             return fabs(agent.goal.x-agent.location.x) + fabs(agent.goal.y-agent.location.y) \
                 - fabs(agent.goal.x-new_location.location.x) - fabs(agent.goal.y-new_location.location.y)
         else:
-            return self.distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x] \
-                - self.distance_map[new_location.location.y][new_location.location.x][agent.goal.y][agent.goal.x]
+            return self.heuristic_distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x] \
+                - self.heuristic_distance_map[new_location.location.y][new_location.location.x][agent.goal.y][agent.goal.x]
     
     def is_at_goal(self, state, agent):
         return state.location == agent.goal
@@ -631,6 +618,27 @@ def make_default_agent_goal(agents: dict):
         agent_goal[agent.name] = []
     return agent_goal
 
+def make_default_agent_idlesteps(agents: dict):
+    # make default dictionary of the counter of idle steps of agents
+    agent_idlesteps= {}
+    for agent in agents.values():
+        agent_idlesteps[agent.name] = 0
+    return agent_idlesteps
+
+def make_default_agent_movesteps(agents: dict):
+    # make default dictionary of the counter of moving steps of agents
+    agent_movesteps= {}
+    for agent in agents.values():
+        agent_movesteps[agent.name] = 0
+    return agent_movesteps
+
+def make_default_agent_expectedsteps(agents: dict):
+    # make default dictionary of the expected value of moving steps to the goals of agents
+    agent_expectedsteps= {}
+    for agent in agents.values():
+        agent_expectedsteps[agent.name] = 0
+    return agent_expectedsteps
+
 def make_default_corridor_direction(corridors):
     # make default dictionary of direction of corridors
     corridor_direction = {}
@@ -642,6 +650,18 @@ def update_agent_goal_dict(agents: dict, agent_goals: dict, time: int):
     # make dictionary of goals of agents at the time
     for agent in agents.values():
         agent_goals[agent.name] += [State(time, agent.goal)]
+
+def update_agent_idle_and_movesteps(agent_paths: dict, agent_idlesteps: dict, agent_movesteps: dict, buffer_size: int):
+    # update the counter of moving steps of agents
+    for agent, paths in agent_paths.items():
+        if len(paths) > 1:
+            for step in range(1, len(paths)):
+                if not (paths[step-1].location == paths[step].location):
+                    agent_movesteps[agent] += 1
+                else:
+                    agent_idlesteps[agent] += 1
+        agent_idlesteps[agent] += buffer_size + 1 - len(paths)
+
 
 def update_agent_corridor_direction(corridors: [Corridor], corridor_directions: dict, time: int):
     # make dictionary of direction of corridors at the time

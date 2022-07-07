@@ -5,10 +5,11 @@ from env import *
 from time import time
 import multiprocessing
 import csv
+import statistics
 
 
 class TestParameter:
-    def __init__(self, solver_type, x_len, y_len, x_num, y_num, line_num, pad_num, agent_num, window_size, buffer_size, worker_num, plan_full_path, only_one_line, only_allow_main_direction):
+    def __init__(self, solver_type, x_len, y_len, x_num, y_num, line_num, pad_num, agent_num, window_size, buffer_size, iterations, worker_num, plan_full_path, only_one_line, only_allow_main_direction):
         self.solver_type = solver_type
         self.x_len = x_len
         self.y_len = y_len
@@ -19,6 +20,7 @@ class TestParameter:
         self.agent_num = agent_num # num or density
         self.window_size = window_size
         self.buffer_size = buffer_size
+        self.iterations = iterations
         self.worker_num = worker_num
         self.plan_full_path = plan_full_path
         self.only_one_line = only_one_line
@@ -47,26 +49,39 @@ class TestParameter:
 def test_without_control(
     env: Environment, episode_reset_seed=0, n_iterations=50, output=False
 ):
-    test_reward = 0
-    test_reach_nodes = 0
-    test_expand_nodes = 0
+    result_reach_nodes = []
+    result_expand_nodes = []
+    result_computing_times = []
+    result_finished_idle_timesteps = []
+    result_finished_moving_timesteps = []
+    result_finished_detour_distances = []
+
+    result_total_finished_tasks = 0
 
     env.reset(episode_reset_seed)
 
-    time_start = time()
+
+    total_time_start = time()
     for iteration in range(n_iterations):
-        finished_tasks, forward_distance, no_solution_in_time, reach_nodes, expand_nodes  = env.step(
+        time_start = time()
+        finished_tasks, forward_distance, no_solution_in_time, reach_nodes, expand_nodes, finished_idle_timesteps, finished_moving_timesteps, finished_detour_distances  = env.step(
             iteration * env.mapf_solver.buffer_size + 1
         )
+        # print(finished_idle_timesteps, finished_moving_timesteps, finished_detour_distances)
         if no_solution_in_time:
             return False
-        test_reward += finished_tasks
-        test_reach_nodes += reach_nodes
-        test_expand_nodes += expand_nodes
+        result_total_finished_tasks += finished_tasks
+        result_reach_nodes.append(reach_nodes)
+        result_expand_nodes.append(expand_nodes)
+        result_finished_idle_timesteps += finished_idle_timesteps
+        result_finished_moving_timesteps += finished_moving_timesteps
+        result_finished_detour_distances += finished_detour_distances
     
-    test_computing_time = time() - time_start
+        result_computing_times.append(time() - time_start)
+    
+    result_total_computing_time = time() - total_time_start
 
-    print("Episode: {} \t Reward: {} \t Computing Time: {}".format(episode_reset_seed, test_reward, test_computing_time))
+    print("Episode: {} \t Reward: {} \t Computing Time: {}".format(episode_reset_seed, result_total_finished_tasks, result_total_computing_time))
 
     if output:
         # Output History
@@ -74,7 +89,7 @@ def test_without_control(
             "history", "episode" + str(episode_reset_seed) + "_output.yaml"
         )
 
-    return test_reward, test_computing_time, test_reach_nodes, test_expand_nodes
+    return result_total_finished_tasks, result_total_computing_time, result_computing_times, result_reach_nodes, result_expand_nodes, result_finished_idle_timesteps, result_finished_moving_timesteps, result_finished_detour_distances
 
 def init_worker(args):
     global env
@@ -82,8 +97,8 @@ def init_worker(args):
 
 def job(args):
     global env
-    episode_reset_seed = args[0]
-    results = test_without_control(env, episode_reset_seed, output=True)
+    (episode_reset_seed, n_iterations) = args
+    results = test_without_control(env, episode_reset_seed, n_iterations, output=True)
     return results
 
 class Worker:
@@ -96,33 +111,53 @@ class Worker:
         print("Make Workers", num_workers)
         return pool
 
-    def work(self, i_episodes):
+    def work(self, i_episodes, iterations):
         episode_reset_seeds = [i for i in range(i_episodes)]
-        work_results = self.pool.map(job, zip(episode_reset_seeds))
-        rewards, computing_times, fail_cases, reach_nodes, expand_nodes = self.make_results(work_results)
+        n_iterations = [iterations for _ in range(iterations)]
+        work_results = self.pool.map(job, zip(episode_reset_seeds, n_iterations))
+        test_total_finished_tasks, test_total_computing_times, computing_times_list, reach_nodes, expand_nodes, idle_timesteps, moving_timesteps, detour_distances, fail_cases = self.make_results(work_results)
         success_cases = i_episodes - fail_cases
-        avg_reward, avg_computing_time = 0 if not success_cases else sum(rewards)/success_cases, 0 if not success_cases else sum(computing_times)/success_cases
-        print(rewards, computing_times)
-        print(avg_reward, avg_computing_time)
+        avg_finished_task, avg_computing_time = "-" if not success_cases else sum(test_total_finished_tasks)/(success_cases*iterations), "-" if not success_cases else sum(test_total_computing_times)/(success_cases*iterations)
+        avg_reach_nodes, avg_expand_nodes = "-" if not success_cases else sum(reach_nodes)/(success_cases*iterations), "-" if not success_cases else sum(expand_nodes)/(success_cases*iterations)
+        # print(idle_timesteps)
+        avg_idle_timesteps, avg_moving_timesteps = "-" if not success_cases else sum(idle_timesteps)/(success_cases*iterations), "-" if not success_cases else sum(moving_timesteps)/(success_cases*iterations)
+        avg_detour_distances = "-" if not success_cases else sum(detour_distances)/(success_cases*iterations)
+        computing_time_stdev = statistics.stdev(computing_times_list)
+        reach_nodes_stdev = statistics.stdev(reach_nodes)
+        expand_nodes_stdev = statistics.stdev(expand_nodes)
+        idle_timesteps_stdev = statistics.stdev(idle_timesteps)
+        moving_timesteps_stdev = statistics.stdev(moving_timesteps)
+        detour_distances_stdev = statistics.stdev(detour_distances)
         print("Fails:", fail_cases)
-        return avg_reward, avg_computing_time, fail_cases, reach_nodes, expand_nodes
+        # print(avg_finished_task, avg_computing_time, computing_times_list, statistics.stdev(computing_times_list))
+        # print(computing_time_stdev, reach_nodes_stdev, expand_nodes_stdev)
+        return avg_finished_task, avg_computing_time, fail_cases, avg_reach_nodes, avg_expand_nodes, avg_idle_timesteps, avg_moving_timesteps, avg_detour_distances, computing_time_stdev, reach_nodes_stdev, expand_nodes_stdev, idle_timesteps_stdev, moving_timesteps_stdev, detour_distances_stdev
     
     def make_results(self, work_results):
         fail_cases = 0
-        test_rewards = []
-        test_computing_times = []
+        test_total_finished_tasks = []
+        test_total_computing_times = []
+        test_computing_times_list = [] 
         test_reach_nodes = []
         test_expand_nodes = []
+        test_finished_idle_timesteps = []
+        test_finished_moving_timesteps = []
+        test_finished_detour_distances = []
         for result in work_results:
             if result:
-                test_reward, test_computing_time, test_reach_node, test_expand_node = result
-                test_rewards.append(test_reward)
-                test_computing_times.append(test_computing_time)
-                test_reach_nodes.append(test_reach_node)
-                test_expand_nodes.append(test_expand_node)
+                result_total_finished_tasks, result_total_computing_time, result_computing_times, result_reach_nodes, result_expand_nodes, result_finished_idle_timesteps, result_finished_moving_timesteps, result_finished_detour_distances = result
+                test_total_finished_tasks.append(result_total_finished_tasks)
+                test_total_computing_times.append(result_total_computing_time)
+                test_computing_times_list += result_computing_times
+                test_reach_nodes += result_reach_nodes
+                test_expand_nodes += result_expand_nodes
+                test_finished_idle_timesteps += result_finished_idle_timesteps
+                test_finished_moving_timesteps += result_finished_moving_timesteps
+                test_finished_detour_distances += result_finished_detour_distances
             else:
                 fail_cases += 1
-        return test_rewards, test_computing_times, fail_cases, test_reach_nodes, test_expand_nodes
+        
+        return test_total_finished_tasks, test_total_computing_times, test_computing_times_list, test_reach_nodes, test_expand_nodes, test_finished_idle_timesteps, test_finished_moving_timesteps, test_finished_detour_distances, fail_cases
 
 
 def test(params: TestParameter, highway_type, test_episodes, use_highway_heuristic, highway_heuristic_setup=None):
@@ -152,12 +187,25 @@ def test(params: TestParameter, highway_type, test_episodes, use_highway_heurist
     print("Corridor Num:", len(corridors))
     print("Obstacle Ratio:", len(grid_map.get_obstacles())/(grid_map.dimension[0]*grid_map.dimension[1]))
     print("Agent Ratio:", len(agents)/len(grid_map.get_spaces()))
+
+
+    s = time()
+    init_corridor_for_heuristic = corridors if use_highway_heuristic else []
+    if use_highway_heuristic:
+        grid_map.fit_corridors(corridors)
+        heuristic_distance_map = grid_map.get_distance_map(highway_heuristic_setup)
+        abstract_distance_map = grid_map.get_distance_map() if highway_heuristic_setup else heuristic_distance_map
+        grid_map.reset()
+    else:
+        heuristic_distance_map = grid_map.get_distance_map()
+        abstract_distance_map = heuristic_distance_map
+    print("Finish Heuristic Map in", time() - s, "s")
     
     if params.solver_type == "CBS":
-        mapf_solver = CBS(grid_map, params.window_size, params.buffer_size, False, corridors if use_highway_heuristic else [], highway_heuristic_setup)
+        mapf_solver = CBS(grid_map, params.window_size, params.buffer_size, False, heuristic_distance_map, abstract_distance_map)
         mapf_solver.plan_full_paths = params.plan_full_path
     elif params.solver_type == "PBS":
-        mapf_solver = PBS(grid_map, params.window_size, params.buffer_size, False, corridors if use_highway_heuristic else [], highway_heuristic_setup)
+        mapf_solver = PBS(grid_map, params.window_size, params.buffer_size, False, heuristic_distance_map, abstract_distance_map)
         mapf_solver.plan_full_paths = params.plan_full_path
 
     X = "X"
@@ -168,14 +216,14 @@ def test(params: TestParameter, highway_type, test_episodes, use_highway_heurist
     env.set_highway_type(highway_type)
 
     workers = Worker(params.worker_num, env)
-    avg_reward, avg_computing_time, fail_cases, reach_nodes, expand_nodes = workers.work(test_episodes)
-    print(reach_nodes, expand_nodes)
+    avg_finished_task, avg_computing_time, fail_cases, avg_reach_nodes, avg_expand_nodes, avg_idle_timesteps, avg_moving_timesteps, avg_detour_distances, computing_time_stdev, reach_nodes_stdev, expand_nodes_stdev, idle_timesteps_stdev, moving_timesteps_stdev, detour_distances_stdev = workers.work(test_episodes, params.iterations)
+    # print(reach_nodes, expand_nodes)
 
     # params.save_result("./test/", (str(avg_reward) + " " + str(avg_computing_time) + "\n")
     # params.save_result("./test/", ("Highway: " if highway else "NoLomit: ") + "Avg. Reward = " + str(avg_reward) + ", Avg. Computing Time = " + str(avg_computing_time))
     # print(("Highway: " if highway else "NoLomit: ") + "Avg. Reward = " + str(avg_reward) + ", Avg. Computing Time = " + str(avg_computing_time))
-
-    return avg_reward, avg_computing_time, fail_cases, grid_map.dimension, len(agents), len(agents)/len(grid_map.get_spaces()), reach_nodes, expand_nodes
+    timestep_per_iteration = params.buffer_size
+    return grid_map.dimension, len(agents), len(agents)/len(grid_map.get_spaces()), avg_finished_task/timestep_per_iteration, avg_computing_time, fail_cases, avg_reach_nodes, avg_expand_nodes, avg_idle_timesteps, avg_moving_timesteps, avg_detour_distances, computing_time_stdev, reach_nodes_stdev, expand_nodes_stdev, idle_timesteps_stdev, moving_timesteps_stdev, detour_distances_stdev
 
 def test_diff_window_size(params: TestParameter, range_iter, test_episodes = 10, output_path = None):
     avg_finished_tasks = {}
@@ -269,21 +317,14 @@ def test_diff_window_size(params: TestParameter, range_iter, test_episodes = 10,
                 writer.writerow([])
 
 def test_diff_highway_w(params: TestParameter, range_iter, test_episodes = 10, output_path = None):
-    avg_finished_tasks = {}
-    avg_computing_time = {}
-    fail_case = {}
-    reach_nodes_list = {}
-    expand_nodes_list = {}
+    data_dict = [{} for _ in range(17)]
     
-    test_types = ["highway(Strict Limit)", "highway(Strict Limit, Partial Plan)", "nolimit(Soft Limit)"]
+    test_types = ["Strict Limit", "Strict Limit, Partial Plan", "Soft Limit"]
     # test_types = ["highway(directed)", "highway(obsolute)", "policy(obsolute)", "nolimit(directed)", "nolimit(obsolute)"]
 
     for test_type in test_types:
-        avg_finished_tasks[test_type] = []
-        avg_computing_time[test_type] = []
-        fail_case[test_type] = []
-        reach_nodes_list[test_type] = []
-        expand_nodes_list[test_type] = []
+        for i in range(len(data_dict)):
+            data_dict[i][test_type] = []
 
     map_dims = []
     agent_nums = []
@@ -291,48 +332,39 @@ def test_diff_highway_w(params: TestParameter, range_iter, test_episodes = 10, o
 
     for highway_w in range_iter:
 
-        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "soft", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
-        avg_finished_tasks["nolimit(Soft Limit)"].append(task_num)
-        avg_computing_time["nolimit(Soft Limit)"].append(time_compute)
-        fail_case["nolimit(Soft Limit)"].append(fail_cases)
-        reach_nodes_list["nolimit(Soft Limit)"].append(reach_nodes)
-        expand_nodes_list["nolimit(Soft Limit)"].append(expand_nodes)
+        results = test(params, "soft", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[2]].append(results[i])
 
-        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
-        avg_finished_tasks["highway(Strict Limit)"].append(task_num)
-        avg_computing_time["highway(Strict Limit)"].append(time_compute)
-        fail_case["highway(Strict Limit)"].append(fail_cases)
-        reach_nodes_list["highway(Strict Limit)"].append(reach_nodes)
-        expand_nodes_list["highway(Strict Limit)"].append(expand_nodes)
+        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[0]].append(results[i])
 
         params.plan_full_path = False
         
-        task_num, time_compute, fail_cases, map_dim, agent_num, agent_ratio, reach_nodes, expand_nodes = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
-        avg_finished_tasks["highway(Strict Limit, Partial Plan)"].append(task_num)
-        avg_computing_time["highway(Strict Limit, Partial Plan)"].append(time_compute)
-        fail_case["highway(Strict Limit, Partial Plan)"].append(fail_cases)
-        reach_nodes_list["highway(Strict Limit, Partial Plan)"].append(reach_nodes)
-        expand_nodes_list["highway(Strict Limit, Partial Plan)"].append(expand_nodes)
+        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[1]].append(results[i])
 
         params.plan_full_path = True
 
-        map_dims.append(map_dim)
-        agent_nums.append(agent_num)
-        agent_ratios.append(agent_ratio)
+        map_dims.append(results[0])
+        agent_nums.append(results[1])
+        agent_ratios.append(results[2])
 
     print("Map Dimensions:", map_dims)
     print("Number of Agents:", agent_nums)
     print("Ratio of Agents to Spaces:", agent_ratios)
     for test_type in test_types:
-        print(f"Avg Finished Tasks ({test_type}):", avg_finished_tasks[test_type])
-        print(f"Avg Computing Time ({test_type}):", avg_computing_time[test_type])
-        print(f"Fail Cases ({test_type}):", fail_case[test_type])
+        print(f"Avg Finished Tasks ({test_type}):", data_dict[0][test_type])
+        print(f"Avg Computing Time ({test_type}):", data_dict[1][test_type])
+        print(f"Fail Cases ({test_type}):", data_dict[2][test_type])
 
     if not output_path == None:
         with open(output_path, 'w+') as csvfile:
             print(output_path)
             writer = csv.writer(csvfile)
-            writer.writerow(["test_type", "dimension", "highway_w", "window_size", "buffer_size", "agent_num", "agent_ratio", "avg. finished tasks", "avg. computing time", "fail cases", "reach nodes", "expand nodes"])
+            writer.writerow(["test_type", "dimension", "highway_w", "window_size", "buffer_size", "agent_num", "agent_ratio", "avg. finished tasks", "avg. computing time", "fail cases", "avg. reach nodes", "avg. expand nodes", "avg. idle_timesteps", "avg. moving_timesteps", "avg. detour_distances", "computing time std.", "reach nodes std.", "expand nodes std.", "idle timesteps std.", "moving timesteps std.", "detour distances std."])
             writer.writerow([])
             for test_type in test_types:
                 for i, highway_w in enumerate(range_iter):
@@ -344,11 +376,13 @@ def test_diff_highway_w(params: TestParameter, range_iter, test_episodes = 10, o
                     row_data.append(params.buffer_size)
                     row_data.append(agent_nums[i])
                     row_data.append(agent_ratios[i])
-                    row_data.append(avg_finished_tasks[test_type][i])
-                    row_data.append(avg_computing_time[test_type][i])
-                    row_data.append(fail_case[test_type][i])
-                    row_data.append(reach_nodes_list[test_type][i])
-                    row_data.append(expand_nodes_list[test_type][i])
+                    for n in range(3,17):
+                        row_data.append(data_dict[n][test_type][i])
+                    # row_data.append(avg_finished_tasks[test_type][i])
+                    # row_data.append(avg_computing_time[test_type][i])
+                    # row_data.append(fail_case[test_type][i])
+                    # row_data.append(reach_nodes_list[test_type][i])
+                    # row_data.append(expand_nodes_list[test_type][i])
                     writer.writerow(row_data)
                 writer.writerow([])
 
@@ -498,6 +532,7 @@ def main():
 
     WINDOW_SIZE = 5
     BUFFER_SIZE = 5
+    ITERATION_NUM = 10
     WORKER_NUM = 10
     plan_full_path = False
 
@@ -515,8 +550,8 @@ def main():
 
     X = "X"
 
-    params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, WORKER_NUM, True, only_one_line, only_allow_main_direction)
-    OUTPUT = f"./test/test.csv"
+    params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
+    OUTPUT = f"./test/test_5.csv"
     test_diff_highway_w(params, [1, 1.2, 1.5, 2, 5, 10, 20, 50, 0], output_path = OUTPUT)
 
     # density = 0.15

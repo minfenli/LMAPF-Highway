@@ -1,6 +1,6 @@
 from ast import Str
 from map import Location, Agent, Corridor
-from pbs import make_default_corridor_direction, state_plus_time_offset, make_default_agent_history, make_default_agent_goal, update_agent_corridor_direction, update_agent_goal_dict, states_to_dict
+from pbs import make_default_agent_expectedsteps, make_default_agent_idlesteps, make_default_agent_movesteps, make_default_corridor_direction, state_plus_time_offset, make_default_agent_history, make_default_agent_goal, update_agent_corridor_direction, update_agent_goal_dict, states_to_dict, update_agent_idle_and_movesteps
 import random
 import yaml
 import os
@@ -25,6 +25,9 @@ class Environment:
         self.spaces = []
         self.agent_history = []
         self.agent_goal = []
+        self.agent_idlesteps = [] # idle timesteps in a task
+        self.agent_movesteps = [] # moving timesteps in a task
+        self.agent_expectedsteps = [] # expected moving timesteps in a task from the abstract distance
         self.corridor_direction = []
         
         self.total_finished_tasks = 0
@@ -50,6 +53,9 @@ class Environment:
             
         self.agent_history = make_default_agent_history(self.agents)
         self.agent_goal = make_default_agent_goal(self.agents)
+        self.agent_idlesteps = make_default_agent_idlesteps(self.agents)
+        self.agent_movesteps = make_default_agent_movesteps(self.agents)
+        self.agent_expectedsteps = make_default_agent_expectedsteps(self.agents)
         self.corridor_direction = make_default_corridor_direction(self.corridors)
 
         if self.highway_type == "strict":
@@ -86,12 +92,17 @@ class Environment:
         update_agent_corridor_direction(self.corridors, self.corridor_direction, time_step)
         solution, reach_nodes, expand_nodes = self.mapf_solver.search(self.agents, return_info=True) 
 
+        update_agent_idle_and_movesteps(solution, self.agent_idlesteps, self.agent_movesteps, self.mapf_solver.buffer_size)
+        
         for agent_name, history in solution.items():
             state_plus_time_offset(history, time_step, sub_state_at_time_zero=True)
             self.agent_history[agent_name] += history
 
         finished_tasks = 0
         forward_distance = 0
+        finished_idle_timesteps = []
+        finished_moving_timesteps = []
+        finished_detour_distances = []
 
         for agent_name, agent in self.agents.items():
             last_history = self.agent_history[agent_name][-1]
@@ -99,15 +110,21 @@ class Environment:
             agent.location = last_history.location
             if(agent.location == agent.goal):
                 finished_tasks += 1
+                finished_idle_timesteps.append(self.agent_idlesteps[agent_name])
+                finished_moving_timesteps.append(self.agent_movesteps[agent_name])
+                finished_detour_distances.append(self.agent_movesteps[agent_name]-self.agent_expectedsteps[agent_name])
                 self.spaces.append((agent.goal.x, agent.goal.y))
                 goal = self.spaces.pop(0)
                 agent.goal = Location(goal[0], goal[1])
+                self.agent_idlesteps[agent_name] = 0
+                self.agent_movesteps[agent_name] = 0
+                self.agent_expectedsteps[agent_name] = self.mapf_solver.abstract_distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x]
                 
         self.total_finished_tasks += finished_tasks
         self.total_forward_distance += forward_distance
 
         no_solution_in_time = False if solution else True
-        return finished_tasks, forward_distance, no_solution_in_time, reach_nodes, expand_nodes
+        return finished_tasks, forward_distance, no_solution_in_time, reach_nodes, expand_nodes, finished_idle_timesteps, finished_moving_timesteps, finished_detour_distances
      
     def output_yaml_history(self, directory: Str, output_filename: Str):
         # Output History
