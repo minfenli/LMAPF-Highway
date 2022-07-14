@@ -57,6 +57,8 @@ class Environment:
         self.agent_movesteps = make_default_agent_movesteps(self.agents)
         self.agent_expectedsteps = make_default_agent_expectedsteps(self.agents)
         self.corridor_direction = make_default_corridor_direction(self.corridors)
+        for agent_name, agent in self.agents.items():
+            self.agent_expectedsteps[agent_name] = self.mapf_solver.abstract_distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x]
 
         if self.highway_type == "strict":
             self.mapf_solver.map.fit_corridors(self.corridors)
@@ -99,14 +101,14 @@ class Environment:
             self.agent_history[agent_name] += history
 
         finished_tasks = 0
-        forward_distance = 0
+        reroute_agents = 0
         finished_idle_timesteps = []
         finished_moving_timesteps = []
         finished_detour_distances = []
 
         for agent_name, agent in self.agents.items():
             last_history = self.agent_history[agent_name][-1]
-            forward_distance += self.mapf_solver.get_agent_forward_distance(last_history, agent)
+            forward_distance = self.mapf_solver.get_agent_forward_distance(last_history.location, agent)
             agent.location = last_history.location
             if(agent.location == agent.goal):
                 finished_tasks += 1
@@ -119,12 +121,19 @@ class Environment:
                 self.agent_idlesteps[agent_name] = 0
                 self.agent_movesteps[agent_name] = 0
                 self.agent_expectedsteps[agent_name] = self.mapf_solver.abstract_distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x]
+            elif forward_distance < 0:
+                # print(time_step, agent_name)
+                reroute_agents += 1
+                # print(agent.goal)
+                # print(agent.location)
+                # import pdb; pdb.set_trace()
+
                 
         self.total_finished_tasks += finished_tasks
         self.total_forward_distance += forward_distance
 
         no_solution_in_time = False if solution else True
-        return finished_tasks, forward_distance, no_solution_in_time, reach_nodes, expand_nodes, finished_idle_timesteps, finished_moving_timesteps, finished_detour_distances
+        return finished_tasks, reroute_agents, no_solution_in_time, reach_nodes, expand_nodes, finished_idle_timesteps, finished_moving_timesteps, finished_detour_distances
      
     def output_yaml_history(self, directory: Str, output_filename: Str):
         # Output History

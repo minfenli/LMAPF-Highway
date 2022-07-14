@@ -7,6 +7,8 @@ from math import fabs
 from copy import deepcopy
 from itertools import combinations
 from random import shuffle, seed
+from numpy.random import shuffle as shffle_v2
+from numpy.random import seed as seed_v2
 import time
         
 class State:
@@ -33,26 +35,6 @@ def state_plus_time_offset(states: [State], time_offset: int, sub_state_at_time_
 
 def states_to_dict(states: [State]):
     return [{'t':state.time, 'x':state.location.x, 'y':state.location.y} for state in states]
-
-class HighLevelNode:
-    def __init__(self): 
-        self.solution = {}
-        self.priorities = Priorities()
-        self.costs = {}
-        self.cost = 0
-
-    def __eq__(self, other):
-        if not isinstance(other, type(self)): return NotImplemented
-        return self.priorities.priorities == other.priorities.priorities
-
-    def __hash__(self):
-        s = ""
-        for i in self.priorities.priority_list:
-            s += i
-        return hash(s)
-    
-    def __lt__(self, other):
-        return len(self.priorities.priority_list) > len(other.priorities.priority_list) if not len(self.priorities.priority_list) == len(other.priorities.priority_list) else (self.priorities.priority_list < other.priorities.priority_list if self.cost == other.cost else self.cost < other.cost)
 
 class Conflict:
     VERTEX = 1
@@ -122,47 +104,6 @@ class Constraints:
         return "VC: " + str([str(vc) for vc in self.vertex_constraints])  + \
             "EC: " + str([str(ec) for ec in self.edge_constraints])
 
-class Priorities:
-    def __init__(self):
-        self.priorities = dict()
-        self.priorities_reverse = dict()
-        self.priority_list = []
-
-    def add_priority(self, agent_1, agent_2):
-        if agent_1 not in self.priorities: self.priorities[agent_1] = []
-        if agent_2 not in self.priorities[agent_1]: self.priorities[agent_1].append(agent_2)
-
-        if agent_2 not in self.priorities_reverse: self.priorities_reverse[agent_2] = []
-        if agent_1 not in self.priorities_reverse[agent_2]: self.priorities_reverse[agent_2].append(agent_1)
-
-        self.priority_list = self._topological(self.priorities)
-        return False if self.priority_list == None else True
-
-    def _topological(self, graph):
-        order, enter, state = [], list(graph), {}
-        # print(order, enter, state)
-        # print(graph)
-        def dfs(node):
-            state[node] = 0
-            if node in graph:
-                for k in graph[node]:
-                    sk = state.get(k, None)
-                    if sk == 0: 
-                        return False # loop check
-                    if sk == 1: continue
-                    if k in enter: enter.remove(k)
-                    if not dfs(k): return False
-            order.insert(0, node)
-            state[node] = 1
-            return True
-        while enter: 
-            if not dfs(enter.pop(-1)):
-                return None
-        return order
-
-    def __str__(self):
-        return "VC: " + str([str(vc) for vc in self.vertex_constraints])  + \
-            "EC: " + str([str(ec) for ec in self.edge_constraints])
 # class Stack:
 #     def __init__(self):
 #         self.list = []
@@ -189,149 +130,40 @@ class Priorities:
 #         else:
 #             self.list.append(node)
 
-class PBS:
+class CA:
     def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, heuristic_distance_map=None, abstract_distance_map=None):
         self.map = map
         self.window_size = window_size
         self.buffer_size = buffer_size
         self.plan_full_paths = True
-        self.search = self.search_set
         self.use_manhat = use_manhat
         self.heuristic_distance_map = heuristic_distance_map # Valid if "use_manhat is False"
         self.abstract_distance_map = abstract_distance_map   # Valid if "use_manhat is False"
+        self.shffle = shffle_v2
+        seed_v2(0)
             # for i in self.distance_map[:][::-1][0][0]: print(i)
             # import pdb; pdb.set_trace()
-        
-    def search_stack(self, agents, time_limit=60, return_info=False):
-        reach_nodes = 0
-        expand_nodes = 0
-
-        time_start = time.time()
-
-        open_set = []
-        closed_set = set()
-        start = HighLevelNode()
-        start.solution, start.costs = self.compute_solution(agents, start.priorities, {}, {})
-        
-        if not start.solution:
-            if return_info:
-                return {}, 0, 0 
-            else: 
-                return {}
-        start.cost = self.compute_solution_cost(start.costs)
-
-        open_set += [start]
-        expand_nodes += 1
-        while open_set:
-            if (time.time()-time_start) >= time_limit:
-                print("Time out.")
-                break
-            reach_nodes += 1
-
-            # even if use stack, still pick the smallest-cost node from the nodes with same level(depth-first-search)
-            if len(open_set) >= 2:
-                idx = -2
-                smallest = -1
-                while(len(open_set[smallest].priorities.priority_list) == len(open_set[idx].priorities.priority_list)):       
-                    if open_set[smallest].cost == open_set[idx].cost:
-                        if open_set[smallest].priorities.priority_list > open_set[idx].priorities.priority_list:
-                            smallest = idx
-                    elif open_set[smallest].cost > open_set[idx].cost:
-                        smallest = idx
-                    idx -= 1
-                    if -idx > len(open_set):
-                        break
-                P = open_set.pop(smallest)
-            else:
-                P = open_set.pop()
-            
-            closed_set |= {P}
-
-            conflict = self.get_first_conflict(P.solution)
-
-            if not conflict:
-                if return_info:
-                    return self.clip_solution(P.solution), reach_nodes, expand_nodes
-                else: 
-                    return self.clip_solution(P.solution)
-
-            new_node = deepcopy(P)
-            if new_node.priorities.add_priority(conflict.agent_1, conflict.agent_2):
-                if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
-                    if new_node.solution:
-                        new_node.cost = self.compute_solution_cost(new_node.costs)
-                        open_set += [new_node]
-                        expand_nodes += 1
-
-            new_node = deepcopy(P)
-
-            if new_node.priorities.add_priority(conflict.agent_2, conflict.agent_1):
-                if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
-                    if new_node.solution:
-                        new_node.cost = self.compute_solution_cost(new_node.costs)
-                        open_set += [new_node]
-                        expand_nodes += 1
-
-        print("No solution found.")
-        if return_info:
-            return {}, 0, 0 
-        else: 
-            return {}
     
-    def search_set(self, agents, time_limit=60, return_info=False):
+    def search(self, agents, time_limit=60, return_info=False):
         reach_nodes = 0
         expand_nodes = 0
 
         time_start = time.time()
 
-        open_set = set()
-        closed_set = set()
-        start = HighLevelNode()
-        start.solution, start.costs = self.compute_solution(agents, start.priorities, {}, {})
-        
-        if not start.solution:
-            if return_info:
-                return {}, 0, 0 
-            else: 
-                return {}
-        start.cost = self.compute_solution_cost(start.costs)
+        priorities = [agent for agent in agents]
 
-        open_set |= {start}
-        expand_nodes += 1
-        while open_set and (time.time()-time_start) < time_limit:
+        while (time.time()-time_start) < time_limit:
             reach_nodes += 1
-            P = min(open_set)
-            open_set -= {P}
-            closed_set |= {P}
+            expand_nodes += 1
+            solution = self.compute_solution(agents, priorities)
 
-            conflict = self.get_first_conflict(P.solution)
-
-            if not conflict:
+            if solution:
                 if return_info:
-                    return self.clip_solution(P.solution), reach_nodes, expand_nodes
+                    return self.clip_solution(solution), reach_nodes, expand_nodes
                 else: 
-                    return self.clip_solution(P.solution)
-
-            new_node = deepcopy(P)
-            if new_node.priorities.add_priority(conflict.agent_1, conflict.agent_2):
-                if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
-                    if new_node.solution:
-                        new_node.cost = self.compute_solution_cost(new_node.costs)
-                        open_set |= {new_node}
-                        expand_nodes += 1
-
-            new_node = deepcopy(P)
-
-            if new_node.priorities.add_priority(conflict.agent_2, conflict.agent_1):
-                if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
-                    if new_node.solution:
-                        new_node.cost = self.compute_solution_cost(new_node.costs)
-                        open_set |= {new_node}
-                        expand_nodes += 1
+                    return self.clip_solution(solution)
+            
+            shffle_v2(priorities)
 
         print("No solution found.")
         if return_info:
@@ -383,41 +215,6 @@ class PBS:
     
     def state_wait(self, state):
         return State(state.time + 1, state.location)
-
-
-    def get_first_conflict(self, solution):
-        max_t = max([len(plan) for plan in solution.values()])
-        check_region = min(max_t, self.window_size+1)
-        # print(max_t, check_region)
-        agent_names = sorted(list(solution.keys()))
-        for t in range(check_region):
-            for agent_1, agent_2 in combinations(agent_names, 2):
-                state_1 = self.get_state(agent_1, solution, t)
-                state_2 = self.get_state(agent_2, solution, t)
-                if state_1.is_equal_except_time(state_2):
-                    return Conflict(t, Conflict.VERTEX, agent_1, agent_2, state_1.location, Location())
-
-            for agent_1, agent_2 in combinations(agent_names, 2):
-                state_1a = self.get_state(agent_1, solution, t)
-                state_1b = self.get_state(agent_1, solution, t+1)
-
-                state_2a = self.get_state(agent_2, solution, t)
-                state_2b = self.get_state(agent_2, solution, t+1)
-
-                if state_1a.is_equal_except_time(state_2b) and state_1b.is_equal_except_time(state_2a):
-                    return Conflict(t, Conflict.EDGE, agent_1, agent_2, state_1a.location, state_1b.location)
-        return False
-
-    def create_priorities_from_conflict(self, conflict):
-        constraint_dict = {}
-        if conflict.type == Conflict.VERTEX:
-            v_constraint = VertexConstraint(conflict.time, conflict.location_1)
-            constraint = Constraints()
-            constraint.vertex_constraints |= {v_constraint}
-            constraint_dict[conflict.agent_1] = constraint
-            constraint_dict[conflict.agent_2] = constraint
-
-        return constraint_dict
     
     def get_state(self, agent_name, solution, t):
         if t < len(solution[agent_name]):
@@ -464,31 +261,18 @@ class PBS:
     def is_at_goal(self, state, agent):
         return state.location == agent.goal
     
-    def compute_solution(self, agents, priorities, solution = {}, cost = {}):
-        if not solution:
-            agents_without_priorities = list(agents.keys())
-            for agent_name in agents_without_priorities:
-                local_solution, local_cost = self.astar(agents[agent_name], Constraints())
-                if not local_solution:
-                    return False
-                solution[agent_name] = local_solution
-                cost[agent_name] = local_cost
+    def compute_solution(self, agents, priorities):
+        solution = {}
 
-        constraints_dict = {}
-        for agent_name in priorities.priority_list:
-            constraints_dict[agent_name] = Constraints()
-        for agent_name in priorities.priority_list:
-            constraints = Constraints()
-            for i in priorities.priorities_reverse.get(agent_name, []):
-                constraints.add_constraint(constraints_dict[i])
+        constraints = Constraints()
+        for agent_name in priorities:
             local_solution, local_cost = self.astar(agents[agent_name], constraints)
             if not local_solution:
-                return None, None
+                return None
             solution[agent_name] = local_solution
-            cost[agent_name] = local_cost
-            self.add_constraint_from_solution(agent_name, local_solution, constraints_dict[agent_name])
+            self.add_constraint_from_solution(agent_name, local_solution, constraints)
         # print(local_cost)
-        return solution, cost
+        return solution
     
     def compute_solution_cost(self, costs):
         return sum(list(costs.values()))
@@ -694,6 +478,7 @@ def main():
     spaces = map.get_spaces()
     seed(1)
     shuffle(spaces)
+    shuffle(spaces)
 
     if(len(spaces) < len(agents)):
         print("Spaces are not enough for agents.")
@@ -721,11 +506,10 @@ def main():
         heuristic_distance_map = map.get_distance_map()
         abstract_distance_map = heuristic_distance_map
 
-    pbs = PBS(map, WINDOW_SIZE, BUFFER_SIZE, args.use_manhat, heuristic_distance_map, abstract_distance_map)
+    pbs = CA(map, WINDOW_SIZE, BUFFER_SIZE, args.use_manhat, heuristic_distance_map, abstract_distance_map)
 
     # map.fit_corridors(corridors)
 
-    cost = []
     time_total = 0.0
     finished_tasks = 0
 

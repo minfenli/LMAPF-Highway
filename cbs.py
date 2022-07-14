@@ -104,27 +104,16 @@ class Constraints:
             "EC: " + str([str(ec) for ec in self.edge_constraints])
 
 class CBS:
-    def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, init_corridor_for_heuristic=[], highway_w=None):
+    def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, heuristic_distance_map=None, abstract_distance_map=None):
         self.map = map
         self.window_size = window_size
         self.buffer_size = buffer_size
         self.plan_full_paths = True
         self.use_manhat = use_manhat
-        if(not self.use_manhat):
-            self.highway_w = highway_w
-            if init_corridor_for_heuristic:
-                self.map.fit_corridors(init_corridor_for_heuristic)
-                self.distance_map = self.map.get_distance_map(self.highway_w)
-                self.map.reset()
-            else:
-                self.distance_map = self.map.get_distance_map()
-            # for i in self.distance_map[0][0][::-1]: print(i) 
-            print("Finish Heuristic Map")
-    
-    def recompute_distance_map(self):
-        self.distance_map = self.map.get_distance_map()
+        self.heuristic_distance_map = heuristic_distance_map # Valid if "use_manhat is False"
+        self.abstract_distance_map = abstract_distance_map   # Valid if "use_manhat is False"
         
-    def search(self, agents, time_limit=600, return_info=False):
+    def search(self, agents, time_limit=60, return_info=False):
         reach_nodes = 0
         expand_nodes = 0
 
@@ -295,15 +284,15 @@ class CBS:
         if(self.use_manhat):
             return fabs(state.location.x - agent.goal.x) + fabs(state.location.y - agent.goal.y)
         else:
-            return self.distance_map[state.location.y][state.location.x][agent.goal.y][agent.goal.x]
+            return self.heuristic_distance_map[state.location.y][state.location.x][agent.goal.y][agent.goal.x]
     
     def get_agent_forward_distance(self, new_location, agent):
         if(self.use_manhat):
             return fabs(agent.goal.x-agent.location.x) + fabs(agent.goal.y-agent.location.y) \
                 - fabs(agent.goal.x-new_location.location.x) - fabs(agent.goal.y-new_location.location.y)
         else:
-            return self.distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x] \
-                - self.distance_map[new_location.location.y][new_location.location.x][agent.goal.y][agent.goal.x]
+            return self.heuristic_distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x] \
+                - self.heuristic_distance_map[new_location.location.y][new_location.location.x][agent.goal.y][agent.goal.x]
     
     def is_at_goal(self, state, agent):
         return state.location == agent.goal
@@ -470,7 +459,20 @@ def main():
     WINDOW_SIZE = 5
     BUFFER_SIZE = 5
     ITERATIONS = 50
-    cbs = CBS(map, WINDOW_SIZE, BUFFER_SIZE, args.use_manhat, corridors if args.use_highway_heuristic else [], args.highway_heuristic_setup)
+
+    if args.use_highway_heuristic:
+        map.fit_corridors(corridors)
+        heuristic_distance_map = map.get_distance_map(args.highway_heuristic_setup)
+        abstract_distance_map = heuristic_distance_map  # grid_map.get_distance_map() if highway_heuristic_setup else heuristic_distance_map
+        map.reset()
+        # for row in heuristic_distance_map[0][0]: print(row)
+        # if not highway_heuristic_setup:
+        #     import pdb; pdb.set_trace()
+    else:
+        heuristic_distance_map = map.get_distance_map()
+        abstract_distance_map = heuristic_distance_map
+
+    cbs = CBS(map, WINDOW_SIZE, BUFFER_SIZE, args.use_manhat, heuristic_distance_map, abstract_distance_map)
 
     # map.fit_corridors(corridors)
 
