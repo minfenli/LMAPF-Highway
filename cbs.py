@@ -292,7 +292,7 @@ class CBS:
                 - fabs(agent.goal.x-new_location.location.x) - fabs(agent.goal.y-new_location.location.y)
         else:
             return self.heuristic_distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x] \
-                - self.heuristic_distance_map[new_location.location.y][new_location.location.x][agent.goal.y][agent.goal.x]
+                - self.heuristic_distance_map[new_location.y][new_location.x][agent.goal.y][agent.goal.x]
     
     def is_at_goal(self, state, agent):
         return state.location == agent.goal

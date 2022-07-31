@@ -8,7 +8,7 @@ import multiprocessing
 import csv
 import statistics
 
-
+OUTPUT_HISTORY = False
 class TestParameter:
     def __init__(self, solver_type, x_len, y_len, x_num, y_num, line_num, pad_num, agent_num, window_size, buffer_size, iterations, worker_num, plan_full_path, only_one_line, only_allow_main_direction):
         self.solver_type = solver_type
@@ -99,9 +99,9 @@ def init_worker(args):
     env = args
 
 def job(args):
-    global env
+    global env, OUTPUT_HISTORY
     (episode_reset_seed, n_iterations) = args
-    results = test_without_control(env, episode_reset_seed, n_iterations, output=False)
+    results = test_without_control(env, episode_reset_seed, n_iterations, output=OUTPUT_HISTORY)
     return results
 
 class Worker:
@@ -165,7 +165,8 @@ class Worker:
         return test_total_finished_tasks, test_total_computing_times, test_computing_times_list, test_reach_nodes, test_expand_nodes, test_reroute_agents, test_finished_idle_timesteps, test_finished_moving_timesteps, test_finished_detour_distances, fail_cases
 
 
-def test(params: TestParameter, highway_type, test_episodes, use_highway_heuristic, highway_heuristic_setup=None):
+def test(params: TestParameter, highway_type, test_episodes, highway_heuristic_setup=None):
+    assert(highway_type=="strict" or highway_type=="soft" or highway_type=="none")
     grid_map, corridor_params = make_map(params.x_len, params.y_len, params.x_num, params.y_num, True, params.line_num, params.pad_num, params.only_one_line, params.only_allow_main_direction)
     corridors = []
     for corridor in corridor_params:
@@ -195,8 +196,7 @@ def test(params: TestParameter, highway_type, test_episodes, use_highway_heurist
 
 
     s = time()
-    init_corridor_for_heuristic = corridors if use_highway_heuristic else []
-    if use_highway_heuristic:
+    if highway_type != "none":
         grid_map.fit_corridors(corridors)
         heuristic_distance_map = grid_map.get_distance_map(highway_heuristic_setup)
         abstract_distance_map = heuristic_distance_map  # grid_map.get_distance_map() if highway_heuristic_setup else heuristic_distance_map
@@ -222,7 +222,7 @@ def test(params: TestParameter, highway_type, test_episodes, use_highway_heurist
     X = "X"
     N = "N"
     env = Environment(
-        f"test_diff_highway_w_{params.solver_type}_{params.x_len}_{params.y_len}_{params.x_num}_{params.y_num}_{params.line_num}_{params.pad_num}_a{len(agents)}_window{params.window_size if not params.window_size==10e10 else X}_{highway_type}_w{highway_heuristic_setup if not highway_heuristic_setup==None else N}" + ("_only_one_line" if params.only_one_line else ""), [grid_map.dimension[0], grid_map.dimension[1]], mapf_solver, agents, corridors
+        f"{params.solver_type}_{params.x_len}_{params.y_len}_{params.x_num}_{params.y_num}_{params.line_num}_{params.pad_num}_a{len(agents)}_window{params.window_size if not params.window_size==10e10 else X}" + ("" if params.plan_full_path else "_partial") + f"_{highway_type}_" + (f"w{highway_heuristic_setup}" if highway_heuristic_setup else N) + ("_only_one_line" if params.only_one_line else ""), [grid_map.dimension[0], grid_map.dimension[1]], mapf_solver, agents, corridors
     )
     env.set_highway_type(highway_type)
 
@@ -253,17 +253,17 @@ def test_diff_highway_w(params: TestParameter, range_iter, test_episodes = 10, o
 
     for highway_w in range_iter:
 
-        results = test(params, "soft", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        results = test(params, "soft", test_episodes, highway_heuristic_setup=highway_w)
         for i in range(len(data_dict)):
             data_dict[i][test_types[2]].append(results[i])
 
-        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=highway_w)
         for i in range(len(data_dict)):
             data_dict[i][test_types[0]].append(results[i])
 
         params.plan_full_path = False
         
-        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=highway_w)
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=highway_w)
         for i in range(len(data_dict)):
             data_dict[i][test_types[1]].append(results[i])
 
@@ -349,21 +349,21 @@ def test_three_highway_diff_agent_num(params: TestParameter, agent_num_list, tes
 
         params.agent_num = agent_num
 
-        results = test(params, "soft", test_episodes, use_highway_heuristic=False, highway_heuristic_setup=None)
+        results = test(params, "none", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[3]].append(results[i])
 
-        results = test(params, "soft", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "soft", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[2]].append(results[i])
 
-        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[1]].append(results[i])
 
         params.plan_full_path = False
         
-        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[0]].append(results[i])
 
@@ -426,6 +426,105 @@ def test_three_highway_diff_agent_num(params: TestParameter, agent_num_list, tes
                     writer.writerow(row_data)
                 writer.writerow([])
 
+# test three different types of highway with different agent densities
+def test_three_highway_diff_agent_density(params: TestParameter, agent_density_list, test_episodes = 10, output_path = None):
+    data_dict = [{} for _ in range(19)]
+    
+    test_types = ["Strict Limit, Partial Plan", "Strict Limit", "Soft Limit", "No Highway"]
+    # test_types = ["highway(directed)", "highway(obsolute)", "policy(obsolute)", "nolimit(directed)", "nolimit(obsolute)"]
+
+    for test_type in test_types:
+        for i in range(len(data_dict)):
+            data_dict[i][test_type] = []
+
+    map_dims = []
+    agent_nums = []
+    agent_ratios = []
+
+    for density in agent_density_list:
+
+        grid_map, corridor_params = make_map(params.x_len, params.y_len, params.x_num, params.y_num, True, params.line_num, params.pad_num, params.only_one_line, params.only_allow_main_direction)
+        params.agent_num = round(len(grid_map.get_spaces())*density)
+
+        results = test(params, "none", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[3]].append(results[i])
+
+        results = test(params, "soft", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[2]].append(results[i])
+
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[1]].append(results[i])
+
+        params.plan_full_path = False
+        
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[0]].append(results[i])
+
+        params.plan_full_path = True
+        
+
+        map_dims.append(results[0])
+        agent_nums.append(results[1])
+        agent_ratios.append(results[2])
+
+    print("Map Dimensions:", map_dims)
+    print("Number of Agents:", agent_nums)
+    print("Ratio of Agents to Spaces:", agent_ratios)
+    for test_type in test_types:
+        print(f"Avg Finished Tasks ({test_type}):", data_dict[0][test_type])
+        print(f"Avg Computing Time ({test_type}):", data_dict[1][test_type])
+        print(f"Fail Cases ({test_type}):", data_dict[2][test_type])
+
+    if not output_path == None:
+        with open(output_path, 'w+') as csvfile:
+            print(output_path)
+            writer = csv.writer(csvfile)
+            writer.writerow([
+                "test_type", 
+                "dimension", 
+                "highway_w", 
+                "window_size", 
+                "buffer_size", 
+                "agent_num", 
+                "agent_density",
+                "agent_ratio", 
+                "avg. finished tasks", 
+                "avg. computing time", 
+                "fail cases", 
+                "avg. reach nodes", 
+                "avg. expand nodes", 
+                "avg. reroute_agents",
+                "avg. idle_timesteps", 
+                "avg. moving_timesteps", 
+                "avg. detour_distances", 
+                "computing time std.", 
+                "reach nodes std.", 
+                "expand nodes std.", 
+                "reroute_agents std.",
+                "idle timesteps std.", 
+                "moving timesteps std.", 
+                "detour distances std."])
+            writer.writerow([])
+            for test_type in test_types:
+                for i, agent_density in enumerate(agent_density_list):
+                    row_data = []
+                    row_data.append(test_type)
+                    row_data.append(map_dims[i])
+                    row_data.append("None")
+                    row_data.append(params.window_size)
+                    row_data.append(params.buffer_size)
+                    row_data.append(agent_nums[i])
+                    row_data.append(agent_density)
+                    row_data.append(agent_ratios[i])
+                    for n in range(3,19):
+                        row_data.append(data_dict[n][test_type][i])
+                    writer.writerow(row_data)
+                writer.writerow([])
+
 # test three different types of highway with different buffer sizes
 def test_three_highway_diff_buffer_size(params: TestParameter, buffer_size_list, test_episodes = 10, output_path = None):
     data_dict = [{} for _ in range(19)]
@@ -444,22 +543,23 @@ def test_three_highway_diff_buffer_size(params: TestParameter, buffer_size_list,
     for buffer_size in buffer_size_list:
 
         params.buffer_size = buffer_size
+        params.window_size = buffer_size
 
-        results = test(params, "soft", test_episodes, use_highway_heuristic=False, highway_heuristic_setup=None)
+        results = test(params, "none", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[3]].append(results[i])
 
-        results = test(params, "soft", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "soft", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[2]].append(results[i])
 
-        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[1]].append(results[i])
 
         params.plan_full_path = False
         
-        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[0]].append(results[i])
 
@@ -513,7 +613,103 @@ def test_three_highway_diff_buffer_size(params: TestParameter, buffer_size_list,
                     row_data.append(test_type)
                     row_data.append(map_dims[i])
                     row_data.append("None")
-                    row_data.append(params.window_size)
+                    row_data.append(buffer_size)
+                    row_data.append(buffer_size)
+                    row_data.append(agent_nums[i])
+                    row_data.append(agent_ratios[i])
+                    for n in range(3,19):
+                        row_data.append(data_dict[n][test_type][i])
+                    writer.writerow(row_data)
+                writer.writerow([])
+
+# test three different types of highway with different window sizes
+def test_three_highway_diff_window_size(params: TestParameter, window_size_list, test_episodes = 10, output_path = None):
+    data_dict = [{} for _ in range(19)]
+    
+    test_types = ["Strict Limit, Partial Plan", "Strict Limit", "Soft Limit", "No Highway"]
+    # test_types = ["highway(directed)", "highway(obsolute)", "policy(obsolute)", "nolimit(directed)", "nolimit(obsolute)"]
+
+    for test_type in test_types:
+        for i in range(len(data_dict)):
+            data_dict[i][test_type] = []
+
+    map_dims = []
+    agent_nums = []
+    agent_ratios = []
+
+    for window_size in window_size_list:
+        
+        params.window_size = window_size
+
+        results = test(params, "none", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[3]].append(results[i])
+
+        results = test(params, "soft", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[2]].append(results[i])
+
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[1]].append(results[i])
+
+        params.plan_full_path = False
+        
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[0]].append(results[i])
+
+        params.plan_full_path = True
+        
+
+        map_dims.append(results[0])
+        agent_nums.append(results[1])
+        agent_ratios.append(results[2])
+
+    print("Map Dimensions:", map_dims)
+    print("Number of Agents:", agent_nums)
+    print("Ratio of Agents to Spaces:", agent_ratios)
+    for test_type in test_types:
+        print(f"Avg Finished Tasks ({test_type}):", data_dict[0][test_type])
+        print(f"Avg Computing Time ({test_type}):", data_dict[1][test_type])
+        print(f"Fail Cases ({test_type}):", data_dict[2][test_type])
+
+    if not output_path == None:
+        with open(output_path, 'w+') as csvfile:
+            print(output_path)
+            writer = csv.writer(csvfile)
+            writer.writerow([
+                "test_type", 
+                "dimension", 
+                "highway_w", 
+                "window_size", 
+                "buffer_size", 
+                "agent_num", 
+                "agent_ratio", 
+                "avg. finished tasks", 
+                "avg. computing time", 
+                "fail cases", 
+                "avg. reach nodes", 
+                "avg. expand nodes", 
+                "avg. reroute_agents",
+                "avg. idle_timesteps", 
+                "avg. moving_timesteps", 
+                "avg. detour_distances", 
+                "computing time std.", 
+                "reach nodes std.", 
+                "expand nodes std.", 
+                "reroute_agents std.",
+                "idle timesteps std.", 
+                "moving timesteps std.", 
+                "detour distances std."])
+            writer.writerow([])
+            for test_type in test_types:
+                for i, window_size in enumerate(window_size_list):
+                    row_data = []
+                    row_data.append(test_type)
+                    row_data.append(map_dims[i])
+                    row_data.append("None")
+                    row_data.append(window_size)
                     row_data.append(params.buffer_size)
                     row_data.append(agent_nums[i])
                     row_data.append(agent_ratios[i])
@@ -522,7 +718,7 @@ def test_three_highway_diff_buffer_size(params: TestParameter, buffer_size_list,
                     writer.writerow(row_data)
                 writer.writerow([])
 
-# test three different types of highway with different map size and a static density
+# test three different types of highway with different map sizes and a constant agent density
 def test_three_highway_diff_map_size(params: TestParameter, map_size_list, density, test_episodes = 10, output_path = None):
     data_dict = [{} for _ in range(19)]
     
@@ -542,21 +738,21 @@ def test_three_highway_diff_map_size(params: TestParameter, map_size_list, densi
         grid_map, corridor_params = make_map(params.x_len, params.y_len, params.x_num, params.y_num, True, params.line_num, params.pad_num, params.only_one_line, params.only_allow_main_direction)
         params.agent_num = round(len(grid_map.get_spaces())*density)
 
-        results = test(params, "soft", test_episodes, use_highway_heuristic=False, highway_heuristic_setup=None)
+        results = test(params, "none", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[3]].append(results[i])
 
-        results = test(params, "soft", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "soft", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[2]].append(results[i])
 
-        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[1]].append(results[i])
 
         params.plan_full_path = False
         
-        results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
         for i in range(len(data_dict)):
             data_dict[i][test_types[0]].append(results[i])
 
@@ -621,6 +817,200 @@ def test_three_highway_diff_map_size(params: TestParameter, map_size_list, densi
                     writer.writerow(row_data)
                 writer.writerow([])
 
+# test three different types of highway with different map sizes and a constant agent density
+def test_three_highway_diff_map_size_test_part(params: TestParameter, map_size_list, density, test_episodes = 10, output_path = None):
+    data_dict = [{} for _ in range(19)]
+    
+    test_types = ["Strict Limit, Partial Plan", "Strict Limit", "Soft Limit, Partial Plan", "Soft Limit", "No Highway, Partial Plan", "No Highway"]
+
+    for test_type in test_types:
+        for i in range(len(data_dict)):
+            data_dict[i][test_type] = []
+
+    map_dims = []
+    agent_nums = []
+    agent_ratios = []
+
+    for map_size in map_size_list:
+        params.x_num = map_size
+        params.y_num = map_size
+        grid_map, corridor_params = make_map(params.x_len, params.y_len, params.x_num, params.y_num, True, params.line_num, params.pad_num, params.only_one_line, params.only_allow_main_direction)
+        params.agent_num = round(len(grid_map.get_spaces())*density)
+
+        results = test(params, "none", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[5]].append(results[i])
+
+        params.plan_full_path = False    
+        
+        results = test(params, "none", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[4]].append(results[i])
+
+        params.plan_full_path = True
+        
+        results = test(params, "soft", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[3]].append(results[i])
+
+        params.plan_full_path = False
+        
+        results = test(params, "soft", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[2]].append(results[i])
+
+        params.plan_full_path = True
+
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[1]].append(results[i])
+
+        params.plan_full_path = False
+        
+        results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
+        for i in range(len(data_dict)):
+            data_dict[i][test_types[0]].append(results[i])
+
+        params.plan_full_path = True
+        
+
+        map_dims.append(results[0])
+        agent_nums.append(results[1])
+        agent_ratios.append(results[2])
+
+    print("Map Dimensions:", map_dims)
+    print("Number of Agents:", agent_nums)
+    print("Ratio of Agents to Spaces:", agent_ratios)
+    for test_type in test_types:
+        print(f"Avg Finished Tasks ({test_type}):", data_dict[0][test_type])
+        print(f"Avg Computing Time ({test_type}):", data_dict[1][test_type])
+        print(f"Fail Cases ({test_type}):", data_dict[2][test_type])
+
+    if not output_path == None:
+        with open(output_path, 'w+') as csvfile:
+            print(output_path)
+            writer = csv.writer(csvfile)
+            writer.writerow([
+                "test_type", 
+                "blocks",
+                "dimension", 
+                "highway_w", 
+                "window_size", 
+                "buffer_size", 
+                "agent_num", 
+                "agent_ratio", 
+                "avg. finished tasks", 
+                "avg. computing time", 
+                "fail cases", 
+                "avg. reach nodes", 
+                "avg. expand nodes", 
+                "avg. reroute_agents",
+                "avg. idle_timesteps", 
+                "avg. moving_timesteps", 
+                "avg. detour_distances", 
+                "computing time std.", 
+                "reach nodes std.", 
+                "expand nodes std.", 
+                "reroute_agents std.",
+                "idle timesteps std.", 
+                "moving timesteps std.", 
+                "detour distances std."])
+            writer.writerow([])
+            for test_type in test_types:
+                for i, map_size in enumerate(map_size_list):
+                    row_data = []
+                    row_data.append(test_type)
+                    row_data.append(str(map_size)+"x"+str(map_size))
+                    row_data.append(map_dims[i])
+                    row_data.append("None")
+                    row_data.append(params.window_size)
+                    row_data.append(params.buffer_size)
+                    row_data.append(agent_nums[i])
+                    row_data.append(agent_ratios[i])
+                    for n in range(3,19):
+                        row_data.append(data_dict[n][test_type][i])
+                    writer.writerow(row_data)
+                writer.writerow([])
+
+
+# test highway with different map size and a constant density
+def test_highway_w_diff_map_size(params: TestParameter, highway_w_list, map_size_list, density, test_episodes = 10, output_path = None):
+    data_dict = [{} for _ in range(19)]
+
+    for highway_w in highway_w_list:
+        for i in range(len(data_dict)):
+            data_dict[i][highway_w] = []
+
+    map_dims = []
+    agent_nums = []
+    agent_ratios = []
+
+    for map_size in map_size_list:
+        params.x_num = map_size
+        params.y_num = map_size
+        grid_map, corridor_params = make_map(params.x_len, params.y_len, params.x_num, params.y_num, True, params.line_num, params.pad_num, params.only_one_line, params.only_allow_main_direction)
+        params.agent_num = round(len(grid_map.get_spaces())*density)
+
+        for n, highway_w in enumerate(highway_w_list):
+            results = test(params, "soft", test_episodes, highway_heuristic_setup=highway_w)
+            for i in range(len(data_dict)):
+                data_dict[i][highway_w].append(results[i])
+        
+
+        map_dims.append(results[0])
+        agent_nums.append(results[1])
+        agent_ratios.append(results[2])
+
+    print("Map Dimensions:", map_dims)
+    print("Number of Agents:", agent_nums)
+    print("Ratio of Agents to Spaces:", agent_ratios)
+
+    if not output_path == None:
+        with open(output_path, 'w+') as csvfile:
+            print(output_path)
+            writer = csv.writer(csvfile)
+            writer.writerow([
+                "blocks",
+                "dimension", 
+                "highway_w", 
+                "window_size", 
+                "buffer_size", 
+                "agent_num", 
+                "agent_ratio", 
+                "avg. finished tasks", 
+                "avg. computing time", 
+                "fail cases", 
+                "avg. reach nodes", 
+                "avg. expand nodes", 
+                "avg. reroute_agents",
+                "avg. idle_timesteps", 
+                "avg. moving_timesteps", 
+                "avg. detour_distances", 
+                "computing time std.", 
+                "reach nodes std.", 
+                "expand nodes std.", 
+                "reroute_agents std.",
+                "idle timesteps std.", 
+                "moving timesteps std.", 
+                "detour distances std."])
+            writer.writerow([])
+            for highway_w in highway_w_list:
+                for i, map_size in enumerate(map_size_list):
+                    row_data = []
+                    row_data.append(str(map_size)+"x"+str(map_size))
+                    row_data.append(map_dims[i])
+                    row_data.append(highway_w if highway_w != 0 else "∞")
+                    row_data.append(params.window_size)
+                    row_data.append(params.buffer_size)
+                    row_data.append(agent_nums[i])
+                    row_data.append(agent_ratios[i])
+                    for n in range(3,19):
+                        row_data.append(data_dict[n][highway_w][i])
+                    writer.writerow(row_data)
+                writer.writerow([])
+
+
+
 # test three different types of highway with the setting of params
 def test_three_highway(params: TestParameter, test_episodes = 10, output_path = None):
     # params.window_size = params.buffer_size
@@ -633,21 +1023,21 @@ def test_three_highway(params: TestParameter, test_episodes = 10, output_path = 
         for i in range(len(data_dict)):
             data_dict[i][test_type] = []
 
-    results = test(params, "soft", test_episodes, use_highway_heuristic=False, highway_heuristic_setup=None)
+    results = test(params, "none", test_episodes, highway_heuristic_setup=None)
     for i in range(len(data_dict)):
         data_dict[i][test_types[3]].append(results[i])
     
-    results = test(params, "soft", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+    results = test(params, "soft", test_episodes, highway_heuristic_setup=None)
     for i in range(len(data_dict)):
         data_dict[i][test_types[2]].append(results[i])
 
-    results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+    results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
     for i in range(len(data_dict)):
         data_dict[i][test_types[1]].append(results[i])
 
     params.plan_full_path = False
     
-    results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+    results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
     for i in range(len(data_dict)):
         data_dict[i][test_types[0]].append(results[i])
 
@@ -723,7 +1113,7 @@ def test_highway(params: TestParameter, test_episodes = 10, output_path = None):
     agent_nums = []
     agent_ratios = []
 
-    results = test(params, "strict", test_episodes, use_highway_heuristic=True, highway_heuristic_setup=None)
+    results = test(params, "strict", test_episodes, highway_heuristic_setup=None)
     for i in range(len(data_dict)):
         data_dict[i][test_types[0]].append(results[i])
 
@@ -766,14 +1156,14 @@ def main():
     BUFFER_SIZE = 5
     ITERATION_NUM = 100
     EPISODE_NUM = 100
-    WORKER_NUM = 50
+    WORKER_NUM = 10
     # plan_full_path = False
 
     x_len = 10
     y_len = 2
-    x_num = 7
-    y_num = 7
-    agent_num = 45
+    x_num = 3
+    y_num = 3
+    agent_num = 10
     solver = "PBS"
 
     line_num = 1
@@ -781,51 +1171,82 @@ def main():
     only_one_line = False
     only_allow_main_direction = False
 
-    X = "X"
-
-    # test different highway w in different types
-    # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
-    # OUTPUT = OUTPUT = f"./test/test_highway_w_types_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a{agent_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
-    # test_diff_highway_w(params, [1, 1.2, 1.5, 2, 5, 10, 20, 50, 0], output_path = OUTPUT)
-
-    # test different highway types
-    # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
-    # OUTPUT = OUTPUT = f"./test/test_highway_types_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a{agent_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
-    # test_three_highway(params, test_episodes=EPISODE_NUM, output_path = OUTPUT)
-
     # ==============Exp from===============
 
     # test different map density
+
+    # test partial
     params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
-    params.solver = "PBS"
-    OUTPUT = OUTPUT = f"./test/test_highway_types_diff_map_size_den5%_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
-    test_three_highway_diff_map_size(params, range(3,16,2), 0.05, test_episodes=EPISODE_NUM, output_path = OUTPUT)
+    OUTPUT = OUTPUT = f"./exp/test_highway_types_diff_map_size_den5%_partial_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
+    test_three_highway_diff_map_size_test_part(params, range(3,6,2), 0.05, test_episodes=EPISODE_NUM, output_path = OUTPUT)
+    
+    # ==================================================================
+    # ============== Experient of Different MAPF Solvers ===============
+    # ==================================================================
 
-    params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
-    params.solver = "CBS"
-    OUTPUT = OUTPUT = f"./test/test_highway_types_diff_map_size_den5%_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
-    test_three_highway_diff_map_size(params, range(3,10,2), 0.05, test_episodes=EPISODE_NUM, output_path = OUTPUT)
+    # solver = "PBS"
+    # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
+    # OUTPUT = OUTPUT = f"./exp/test_highway_types_diff_map_size_den5%_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
+    # test_three_highway_diff_map_size(params, range(3,16,2), 0.05, test_episodes=EPISODE_NUM, output_path = OUTPUT)
 
-    params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
-    params.solver = "CA*"
-    OUTPUT = OUTPUT = f"./test/test_highway_types_diff_map_size_den5%_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
-    test_three_highway_diff_map_size(params, range(3,10,2), 0.05, test_episodes=EPISODE_NUM, output_path = OUTPUT)
+    # solver = "CBS"
+    # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
+    # OUTPUT = OUTPUT = f"./exp/test_highway_types_diff_map_size_den5%_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
+    # test_three_highway_diff_map_size(params, range(3,16,2), 0.05, test_episodes=EPISODE_NUM, output_path = OUTPUT)
+
+    # [o] FINISH on BRANDY
+    # solver = "CA*"
+    # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
+    # OUTPUT = OUTPUT = f"./exp/test_highway_types_diff_map_size_den5%_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
+    # test_three_highway_diff_map_size(params, range(3,16,2), 0.05, test_episodes=EPISODE_NUM, output_path = OUTPUT)
 
 
-    # TODO:: differ buffer size 
-    # for l_n, agent_n in zip([3,5,7,9,11], [10,25,45,70,100]):
+    # ==================================================================
+    # ============= Experient of Different Agent Densities =============
+    # ==================================================================
+
+    # solver = "PBS"
+    # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
+    # OUTPUT = OUTPUT = f"./exp/output_test_highway_types_diff_agent_density_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
+    # test_three_highway_diff_agent_density(params, [x*0.01 for x in range(5,45,5)], test_episodes=EPISODE_NUM, output_path = OUTPUT)
+
+
+    # ==================================================================
+    # ============ Experient of Different "s" and Map Sizes ============
+    # ==================================================================
+
+    # solver = "PBS"
+    # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
+    # OUTPUT = OUTPUT = f"./exp/test_highway_w_diff_map_size_den5%_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
+    # test_highway_w_diff_map_size(params, [1, 1.2, 1.5, 2, 5, 10, 50, 0], range(3,12,2), 0.05, test_episodes=EPISODE_NUM, output_path = OUTPUT)
+
+    
+    # ==================================================================
+    # ============ Experient of Different "h" and Map Sizes ============
+    # ==================================================================
+
+    # solver = "PBS"
+    # for l_n, agent_n in zip([3, 5, 7,9], [8, 20, 37, 59]):
     #     x_num = l_n
     #     y_num = l_n
     #     agent_num = agent_n
     #     params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
-    #     OUTPUT = OUTPUT = f"./test/test_highway_types_diff_buffer_size_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a{agent_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
+    #     OUTPUT = OUTPUT = f"./exp/test_three_highway_diff_buffer_size_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a{agent_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
     #     test_three_highway_diff_buffer_size(params, range(1,11), test_episodes=EPISODE_NUM, output_path = OUTPUT)
 
 
-    # test different agent nums with different agent and highway types
-    # params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
-    # OUTPUT = OUTPUT = f"./test/test_highway_types_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a5_10_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
-    # test_three_highway_diff_agent_num(params, range(5,155,5), test_episodes=EPISODE_NUM, output_path = OUTPUT)
+    # ==================================================================
+    # ============ Experient of Different "w" and Map Sizes ============
+    # ==================================================================
+    
+    # solver = "PBS"
+    # for l_n, agent_n in zip([3, 5, 7,9], [8, 20, 37, 59]):
+    #     x_num = l_n
+    #     y_num = l_n
+    #     agent_num = agent_n
+    #     params = TestParameter(solver,x_len,y_len,x_num,y_num,line_num,pad_num,agent_num, WINDOW_SIZE, BUFFER_SIZE, ITERATION_NUM, WORKER_NUM, True, only_one_line, only_allow_main_direction)
+    #     OUTPUT = OUTPUT = f"./exp/test_three_highway_diff_window_size_i{ITERATION_NUM}_e{EPISODE_NUM}_{x_len}{y_len}{x_num}{y_num}_{line_num}_{pad_num}_a{agent_num}_{solver}" + ("_only_one_line" if only_one_line else "") + ".csv"
+    #     test_three_highway_diff_window_size(params, range(5,11), test_episodes=EPISODE_NUM, output_path = OUTPUT)
 
     print("Overall Computing Time:", time()-time_start)
 

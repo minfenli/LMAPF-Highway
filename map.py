@@ -354,11 +354,11 @@ def str2bool(v):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--x_len", type= int, default= 2, help="length of x of obstacles")
+    parser.add_argument("--x_len", type= int, default= 10, help="length of x of obstacles")
     parser.add_argument("--y_len", type= int, default= 2, help="length of y of obstacles")
-    parser.add_argument("--x_num", type= int, default= 5, help="number of obstacles on x-axis")
-    parser.add_argument("--y_num", type= int, default= 5, help="number of obstacles on y-axis")
-    parser.add_argument("--agent_num", type= int, default= 25, help="number of agents")
+    parser.add_argument("--x_num", type= int, default= 3, help="number of obstacles on x-axis")
+    parser.add_argument("--y_num", type= int, default= 3, help="number of obstacles on y-axis")
+    parser.add_argument("--agent_num", type= int, default= 40, help="number of agents")
     parser.add_argument("--warehouse_form", type= str2bool, default=True, help="form like warehouse, not care loops")
     parser.add_argument("--line_num", type= int, default= 1, help="number of corridors in a single column or row")
     parser.add_argument("--line_pad", type= int, default= 0, help="number of corridors padding around")
