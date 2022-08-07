@@ -85,20 +85,37 @@ class Animation:
             self.agent_names[name].set_verticalalignment('center')
             self.name_texts.append(self.agent_names[name])
         
-        self.finished_tasks_text = self.ax.text(1.9, 1.85, 'Finished tasks: ' + str(self.finished_tasks), {'weight':'bold'})
+        self.finished_tasks_text = self.ax.text(0.9, 0.9, 'Finished tasks: ' + str(self.finished_tasks), {'weight':'bold'})
         self.finished_tasks_text.set_horizontalalignment('left')
         self.finished_tasks_text.set_bbox(dict(facecolor='white', alpha=0.7, edgecolor='none'))
 
-        self.highway_text = self.ax.text(xmax-2.4, ymax-2.7, 'Highway (single-line)', {'weight':'bold', 'fontsize':13})
+        self.highway_text = self.ax.text(xmax-1.4, ymax-1.62, 'No Highway', {'weight':'bold', 'fontsize':14})
         self.highway_text.set_horizontalalignment('right')
         self.highway_text.set_bbox(dict(facecolor='white', alpha=0.7, edgecolor='none'))
+
+        # =============================================
+        # ============== for 3x3, 1 line ==============
+        # =============================================
+
+        # self.finished_tasks_text = self.ax.text(0.9, 0.9, 'Finished tasks: ' + str(self.finished_tasks), {'weight':'bold'})
+        # self.finished_tasks_text.set_horizontalalignment('left')
+        # self.finished_tasks_text.set_bbox(dict(facecolor='white', alpha=0.7, edgecolor='none'))
+
+        # self.highway_text = self.ax.text(xmax-1.4, ymax-1.62, 'No Highway', {'weight':'bold', 'fontsize':14})
+        # self.highway_text.set_horizontalalignment('right')
+        # self.highway_text.set_bbox(dict(facecolor='white', alpha=0.7, edgecolor='none'))
         
-        # self.descriptions = [self.ax.text(xmax-12, - 1.15, 'Agent Label: ', {'weight':'bold'}),
-        #                       Circle((1, - 1.15), 0.33, facecolor='orange', edgecolor='black'),
-        #                       self.ax.text(xmax-8, - 1.15, '1', {'color':'Purple', 'weight':'bold'}),
-        #                       self.ax.text(xmax-6, - 1.15, 'Goal Label: ', {'weight':'bold'}),
-        #                       self.ax.text(xmax-2, - 1.15, '1', {'color':'cornflowerblue', 'weight':'bold'})
-        #                     ] if SHOW_DISCRIPTION else []
+        # =============================================
+        # ============== for 3x3, 2 line ==============
+        # =============================================
+
+        # self.finished_tasks_text = self.ax.text(1.9, 1.85, 'Finished tasks: ' + str(self.finished_tasks), {'weight':'bold'})
+        # self.finished_tasks_text.set_horizontalalignment('left')
+        # self.finished_tasks_text.set_bbox(dict(facecolor='white', alpha=0.7, edgecolor='none'))
+
+        # self.highway_text = self.ax.text(xmax-2.4, ymax-2.7, 'Highway (single-line)', {'weight':'bold', 'fontsize':13})
+        # self.highway_text.set_horizontalalignment('right')
+        # self.highway_text.set_bbox(dict(facecolor='white', alpha=0.7, edgecolor='none'))
 
         if time_limit:
             self.T = min(self.T, time_limit)
