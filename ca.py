@@ -172,13 +172,9 @@ class CA:
             return {}
 
     def clip_solution(self, solution):
-        # self.print_solution(solution)
         for agent_name, path in solution.items():
             end = min(len(path), self.buffer_size+1)
             solution[agent_name] = path[:end]
-        # input("AAAAA")
-        # self.print_solution(solution)
-        # input("BBBBB")
         return solution
     
     def print_solution(self, solution):

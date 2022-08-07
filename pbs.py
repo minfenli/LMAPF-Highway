@@ -202,6 +202,70 @@ class PBS:
             # for i in self.distance_map[:][::-1][0][0]: print(i)
             # import pdb; pdb.set_trace()
         
+    def search_naive_stack(self, agents, time_limit=60, return_info=False):
+        reach_nodes = 0
+        expand_nodes = 0
+
+        time_start = time.time()
+
+        open_set = []
+        closed_set = set()
+        start = HighLevelNode()
+        start.solution, start.costs = self.compute_solution(agents, start.priorities, {}, {})
+        
+        if not start.solution:
+            if return_info:
+                return {}, 0, 0 
+            else: 
+                return {}
+        start.cost = self.compute_solution_cost(start.costs)
+
+        open_set += [start]
+        expand_nodes += 1
+        while open_set:
+            if (time.time()-time_start) >= time_limit:
+                print("Time out.")
+                break
+            reach_nodes += 1
+
+            # even if use stack, still pick the smallest-cost node from the nodes with same level(depth-first-search)
+            P = open_set.pop()
+            
+            closed_set |= {P}
+
+            conflict = self.get_first_conflict(P.solution)
+
+            if not conflict:
+                if return_info:
+                    return self.clip_solution(P.solution), reach_nodes, expand_nodes
+                else: 
+                    return self.clip_solution(P.solution)
+
+            new_node = deepcopy(P)
+            if new_node.priorities.add_priority(conflict.agent_1, conflict.agent_2):
+                if new_node not in closed_set:
+                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
+                    if new_node.solution:
+                        new_node.cost = self.compute_solution_cost(new_node.costs)
+                        open_set += [new_node]
+                        expand_nodes += 1
+
+            new_node = deepcopy(P)
+
+            if new_node.priorities.add_priority(conflict.agent_2, conflict.agent_1):
+                if new_node not in closed_set:
+                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
+                    if new_node.solution:
+                        new_node.cost = self.compute_solution_cost(new_node.costs)
+                        open_set += [new_node]
+                        expand_nodes += 1
+
+        print("No solution found.")
+        if return_info:
+            return {}, 0, 0 
+        else: 
+            return {}
+
     def search_stack(self, agents, time_limit=60, return_info=False):
         reach_nodes = 0
         expand_nodes = 0
@@ -340,13 +404,9 @@ class PBS:
             return {}
 
     def clip_solution(self, solution):
-        # self.print_solution(solution)
         for agent_name, path in solution.items():
             end = min(len(path), self.buffer_size+1)
             solution[agent_name] = path[:end]
-        # input("AAAAA")
-        # self.print_solution(solution)
-        # input("BBBBB")
         return solution
     
     def print_solution(self, solution):
