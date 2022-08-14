@@ -1,6 +1,4 @@
 import argparse
-from os import stat
-from re import S
 import yaml
 from map import Location, Map, Agent, Corridor, PrioritySet
 from math import fabs
@@ -140,8 +138,6 @@ class Priorities:
 
     def _topological(self, graph):
         order, enter, state = [], list(graph), {}
-        # print(order, enter, state)
-        # print(graph)
         def dfs(node):
             state[node] = 0
             if node in graph:
@@ -163,31 +159,6 @@ class Priorities:
     def __str__(self):
         return "VC: " + str([str(vc) for vc in self.vertex_constraints])  + \
             "EC: " + str([str(ec) for ec in self.edge_constraints])
-# class Stack:
-#     def __init__(self):
-#         self.list = []
-
-#     def pop(self, index=-1):
-#         return self.list.pop(index)
-
-#     def push(self, node):
-#         self.list.append(node)
-
-#     def push_by_priority(self, node):
-#         if len(self.list):
-#             idx = -1 
-#             while(len(node.priorities.priority_list) == len(self.list[idx].priorities.priority_list)):   
-#                 if node.cost == self.list[idx].cost:
-#                     if node.priorities.priority_list < self.list[idx].priorities.priority_list:
-#                         break
-#                 elif node.cost < self.list[idx].cost:
-#                     break
-#                 idx -= 1
-#                 if -idx > len(self.list):
-#                     break
-#             self.list.insert(idx, node)
-#         else:
-#             self.list.append(node)
 
 class PBS:
     def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, heuristic_distance_map=None, abstract_distance_map=None):
@@ -199,10 +170,8 @@ class PBS:
         self.use_manhat = use_manhat
         self.heuristic_distance_map = heuristic_distance_map # Valid if "use_manhat is False"
         self.abstract_distance_map = abstract_distance_map   # Valid if "use_manhat is False"
-            # for i in self.distance_map[:][::-1][0][0]: print(i)
-            # import pdb; pdb.set_trace()
         
-    def search_naive_stack(self, agents, time_limit=60, return_info=False):
+    def search_standard_stack(self, agents, time_limit=60, return_info=False):
         reach_nodes = 0
         expand_nodes = 0
 
@@ -266,7 +235,7 @@ class PBS:
         else: 
             return {}
 
-    def search_stack(self, agents, time_limit=60, return_info=False):
+    def search_modified_stack(self, agents, time_limit=60, return_info=False):
         reach_nodes = 0
         expand_nodes = 0
 
@@ -364,7 +333,10 @@ class PBS:
 
         open_set |= {start}
         expand_nodes += 1
-        while open_set and (time.time()-time_start) < time_limit:
+        while open_set:
+            if (time.time()-time_start) >= time_limit:
+                print("Time out.")
+                break
             reach_nodes += 1
             P = min(open_set)
             open_set -= {P}
@@ -408,13 +380,6 @@ class PBS:
             end = min(len(path), self.buffer_size+1)
             solution[agent_name] = path[:end]
         return solution
-    
-    def print_solution(self, solution):
-        for agent_name, path in solution.items():
-            print(agent_name + ":")
-            for step in path:
-                print(step)
-        return solution
 
     def get_neighbors(self, state, agent, constraints):
         neighbors = []
@@ -441,14 +406,9 @@ class PBS:
             neighbors.append(n)
         return neighbors
     
-    def state_wait(self, state):
-        return State(state.time + 1, state.location)
-
-
     def get_first_conflict(self, solution):
         max_t = max([len(plan) for plan in solution.values()])
         check_region = min(max_t, self.window_size+1)
-        # print(max_t, check_region)
         agent_names = sorted(list(solution.keys()))
         for t in range(check_region):
             for agent_1, agent_2 in combinations(agent_names, 2):
@@ -484,8 +444,7 @@ class PBS:
             return solution[agent_name][t]
         else:
             return solution[agent_name][-1]
-
-    
+   
     def location_in_vertex_constraint_after_time(self, constraints, state):
         for v in constraints:
             if v.location == state.location and v.time >= state.time:
@@ -547,7 +506,6 @@ class PBS:
             solution[agent_name] = local_solution
             cost[agent_name] = local_cost
             self.add_constraint_from_solution(agent_name, local_solution, constraints_dict[agent_name])
-        # print(local_cost)
         return solution, cost
     
     def compute_solution_cost(self, costs):
@@ -578,7 +536,6 @@ class PBS:
             constraints.vertex_constraints |= {v_constraint}
 
     def astar(self, agent, constraints):
-        # print(constraints)
         """
         low level search 
         """
@@ -603,19 +560,6 @@ class PBS:
             current = open_set.pop()
 
             if self.is_at_goal(current, agent) or (not self.plan_full_paths and g_score.setdefault(current, float(-1)) >= self.window_size):
-
-                # if (agent.name == "agent5") and agent.goal.x == 8 and agent.goal.y == 6:
-                #     with open("./log1.txt", "a+") as f:
-                #         f.write("  agent5"+str(agent.location)+"\n")
-                #         print("  agent5"+str(agent.location)+"\n")
-                #         for i in self.reconstruct_path_full(came_from, current):
-                #             f.write(str(i)+'\n')
-                #         f.write(str(constraints)+'\n')
-                #         print(constraints)
-                # if (agent.name == "agent5" and agent.location == Location(4,3)):
-                #     print(agent.goal, agent.location)
-                #     print(f_score[current], g_score[current])
-                #     self.reconstruct_path_print(came_from, current)
                 return self.reconstruct_path(came_from, current), f_score[current]
 
             closed_set |= {current}
@@ -772,11 +716,8 @@ def main():
     if args.use_highway_heuristic:
         map.fit_corridors(corridors)
         heuristic_distance_map = map.get_distance_map(args.highway_heuristic_setup)
-        abstract_distance_map = heuristic_distance_map  # grid_map.get_distance_map() if highway_heuristic_setup else heuristic_distance_map
+        abstract_distance_map = heuristic_distance_map
         map.reset()
-        # for row in heuristic_distance_map[0][0]: print(row)
-        # if not highway_heuristic_setup:
-        #     import pdb; pdb.set_trace()
     else:
         heuristic_distance_map = map.get_distance_map()
         abstract_distance_map = heuristic_distance_map
@@ -799,8 +740,6 @@ def main():
         time_end = time.time()
         print("computing time: ", time_end - time_start)
         time_total += time_end - time_start
-        
-        # cost.append(pbs.compute_solution_cost(solution))
 
         # 3. Save the paths of agents.
         for agent_name, history in solution.items():
@@ -810,7 +749,6 @@ def main():
         # 4. Assign tasks to the agents that have finished their tasks.
         finished_agents = []
         for agent_name, agent in agents.items():
-            # print(agent)
             last_history = agent_history[agent_name][-1]
             agent.location = last_history.location
             if(agent.location == agent.goal):

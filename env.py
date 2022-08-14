@@ -122,11 +122,7 @@ class Environment:
                 self.agent_movesteps[agent_name] = 0
                 self.agent_expectedsteps[agent_name] = self.mapf_solver.abstract_distance_map[agent.location.y][agent.location.x][agent.goal.y][agent.goal.x]
             elif forward_distance < 0:
-                # print(time_step, agent_name)
                 reroute_agents += 1
-                # print(agent.goal)
-                # print(agent.location)
-                # import pdb; pdb.set_trace()
 
                 
         self.total_finished_tasks += finished_tasks
