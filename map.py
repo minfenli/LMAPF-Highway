@@ -14,19 +14,25 @@ class Location:
 
 class GridProperty:
     def __init__(self, is_obstacle: bool = False, is_up: bool = True,\
-         is_down: bool = True, is_left: bool = True, is_right: bool = True):
+         is_down: bool = True, is_left: bool = True, is_right: bool = True, step_cost_wait: int = None, step_cost_up: int = None, step_cost_down: int = None, step_cost_left: int = None, step_cost_right: int = None):
         self.is_obstacle = is_obstacle
         self.is_up = is_up
         self.is_down = is_down
         self.is_left = is_left
         self.is_right = is_right
+        self.step_cost_up = step_cost_up
+        self.step_cost_down = step_cost_down
+        self.step_cost_left = step_cost_left
+        self.step_cost_right = step_cost_right
+        self.step_cost_wait = step_cost_wait
     def __eq__(self, other):
-        return self.is_obstacle == other.is_obstacle and self.is_up == other.is_up and self.is_down == other.is_down and self.is_left == other.is_left and self.is_right == other.is_right
+        return self.is_obstacle == other.is_obstacle and self.is_up == other.is_up and self.is_down == other.is_down and self.is_left == other.is_left and self.is_right == other.is_right\
+            and self.step_cost_wait == other.step_cost_wait and self.step_cost_up == other.step_cost_up and self.step_cost_down == other.step_cost_down and self.step_cost_left == other.step_cost_left and self.step_cost_right == other.step_cost_right
     def __str__(self):
         return str((self.is_obstacle, self.is_up, self.is_down, self.is_left, self.is_right))
     def reset_all_direction(self):
         """
-        Reset all the direction attributes as true except "is_obstacle"
+        Reset all the direction attributes as true except "is_obstacle" and "step_cost"
         """
         self.is_up = True
         self.is_down = True
@@ -49,7 +55,7 @@ class Corridor:
         self.reverse = reverse
 
 class Map:
-    def __init__(self, x: int = 0, y: int = 0, only_allow_main_direction: bool = False):
+    def __init__(self, x: int = 0, y: int = 0, only_allow_main_direction: bool = False, anti_direction_cost: int = 1):
         self.grid = []
         self.dimension = [x, y]
         for y_idx in range(y):
@@ -60,6 +66,7 @@ class Map:
                 row.append(Grid(location, grid_property))
             self.grid.append(row)
         self.only_allow_main_direction = only_allow_main_direction
+        self.anti_direction_cost = anti_direction_cost
     def __str__(self):
         string = ""
         for row in self.grid:
@@ -99,7 +106,7 @@ class Map:
         """
         Set the direction limitation based on "corridors".
         """
-        self.reset()
+        self.reset_direction_limitation()
         for corridor in corridors:
             # vertical 
             if(self.find_corridor_direction(corridor)):
@@ -107,13 +114,19 @@ class Map:
                 if(corridor.reverse):
                     for y in range(corridor.start.y-1, corridor.end.y+1):
                         self.grid[y][x].grid_property.is_up = False
+                        self.grid[y][x].grid_property.step_cost_up = self.anti_direction_cost
                         if self.only_allow_main_direction and not y == corridor.start.y-1:
+                            self.grid[y][x].grid_property.step_cost_left = self.anti_direction_cost
+                            self.grid[y][x].grid_property.step_cost_right = self.anti_direction_cost
                             self.grid[y][x].grid_property.is_left = False
                             self.grid[y][x].grid_property.is_right = False
                 else:
                     for y in range(corridor.start.y, corridor.end.y+2):
                         self.grid[y][x].grid_property.is_down = False
+                        self.grid[y][x].grid_property.step_cost_down = self.anti_direction_cost
                         if self.only_allow_main_direction and not y == corridor.end.y+1:
+                            self.grid[y][x].grid_property.step_cost_left = self.anti_direction_cost
+                            self.grid[y][x].grid_property.step_cost_right = self.anti_direction_cost
                             self.grid[y][x].grid_property.is_left = False
                             self.grid[y][x].grid_property.is_right = False
             # horizontal
@@ -122,13 +135,19 @@ class Map:
                 if(corridor.reverse):
                     for x in range(corridor.start.x-1, corridor.end.x+1):
                         self.grid[y][x].grid_property.is_right = False
+                        self.grid[y][x].grid_property.step_cost_right = self.anti_direction_cost
                         if self.only_allow_main_direction and not x == corridor.start.x-1:
+                            self.grid[y][x].grid_property.step_cost_up = self.anti_direction_cost
+                            self.grid[y][x].grid_property.step_cost_down = self.anti_direction_cost
                             self.grid[y][x].grid_property.is_up = False
                             self.grid[y][x].grid_property.is_down = False
                 else:
                     for x in range(corridor.start.x, corridor.end.x+2):
                         self.grid[y][x].grid_property.is_left = False
+                        self.grid[y][x].grid_property.step_cost_left = self.anti_direction_cost
                         if self.only_allow_main_direction and not x == corridor.end.x+1:
+                            self.grid[y][x].grid_property.step_cost_up = self.anti_direction_cost
+                            self.grid[y][x].grid_property.step_cost_down = self.anti_direction_cost
                             self.grid[y][x].grid_property.is_up = False
                             self.grid[y][x].grid_property.is_down = False
     
@@ -142,7 +161,7 @@ class Map:
                 return True
         return False
     
-    def reset(self):
+    def reset_direction_limitation(self):
         """
         Reset all the direction limitation, every direction is available after the reset.
         """
@@ -174,6 +193,7 @@ class Map:
                 print(token, end=' ')
             print()
     
+    # calculate distance map based on current grid properties.
     def get_distance_map(self, highway_heuristic_w=None):
         distance_map = []
         for y in range(self.dimension[1]):
@@ -183,10 +203,10 @@ class Map:
             distance_map.append(row_list)
         return distance_map
 
-def make_map(obstacle_x: int, obstacle_y: int, num_x: int, num_y: int, warehouse_form=False, num_line: int=1, num_pad: int=0, only_one_line: bool=False, only_allow_main_direction: bool=False):
+def make_map(obstacle_x: int, obstacle_y: int, num_x: int, num_y: int, warehouse_form=False, num_line: int=1, num_pad: int=0, only_one_line: bool=False, only_allow_main_direction: bool = False, anti_direction_cost: int = 1):
     x = num_line + (obstacle_x + num_line) * num_x + num_pad*2
     y = num_line + (obstacle_y + num_line) * num_y + num_pad*2
-    map = Map(x, y, only_allow_main_direction)
+    map = Map(x, y, only_allow_main_direction, anti_direction_cost)
     corridor = []
     for x_idx in range(num_x):
         for y_idx in range(num_y):
@@ -209,7 +229,7 @@ def make_map(obstacle_x: int, obstacle_y: int, num_x: int, num_y: int, warehouse
     # print(corridor)
     return map, corridor
    
-# highway_in_heuristic: strict limitation if highway_in_heuristic is False, moving backward is not allowed in a highway.
+# highway_in_heuristic: strict limitation if highway_in_heuristic is None or 0, moving backward is not allowed in a highway.
 #                       otherwise, use soft limitation by increasing cost on the heuristic function
 def get_distance_map_from_single_point(map: Map, start, highway_heuristic_w):
     distance_map_from_start = []

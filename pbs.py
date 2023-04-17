@@ -14,7 +14,7 @@ class State:
     def __eq__(self, other):
         return self.time == other.time and self.location == other.location
     def __hash__(self):
-        return hash(str(self.time)+str(self.location.x) + str(self.location.y))
+        return hash(str((self.time, self.location.x, self.location.y)))
     def is_equal_except_time(self, state):
         return self.location == state.location
     def __str__(self):
@@ -38,6 +38,7 @@ class HighLevelNode:
         self.priorities = Priorities()
         self.costs = {}
         self.cost = 0
+        self.anti_direction_counts = {}
 
     def __eq__(self, other):
         if not isinstance(other, type(self)): return NotImplemented
@@ -161,15 +162,16 @@ class Priorities:
             "EC: " + str([str(ec) for ec in self.edge_constraints])
 
 class PBS:
-    def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, heuristic_distance_map=None, abstract_distance_map=None):
+    def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, heuristic_distance_map=None, abstract_distance_map=None, inflate_g_value=False):
         self.map = map
         self.window_size = window_size
         self.buffer_size = buffer_size
         self.plan_full_paths = True
-        self.search = self.search_set
+        self.search = self.search_standard_stack
         self.use_manhat = use_manhat
         self.heuristic_distance_map = heuristic_distance_map # Valid if "use_manhat is False"
         self.abstract_distance_map = abstract_distance_map   # Valid if "use_manhat is False"
+        self.inflate_g_value = inflate_g_value  # Inflate step cost when moving across grids during low-level planning based on grid properties. Otherwise, step cost = 1.
         
     def search_standard_stack(self, agents, time_limit=60, return_info=False):
         reach_nodes = 0
@@ -180,11 +182,11 @@ class PBS:
         open_set = []
         closed_set = set()
         start = HighLevelNode()
-        start.solution, start.costs = self.compute_solution(agents, start.priorities, {}, {})
+        start.solution, start.costs, start.anti_direction_counts = self.compute_solution(agents, start.priorities, {}, {}, {})
         
         if not start.solution:
             if return_info:
-                return {}, 0, 0 
+                return {}, 0, 0, {} 
             else: 
                 return {}
         start.cost = self.compute_solution_cost(start.costs)
@@ -206,14 +208,14 @@ class PBS:
 
             if not conflict:
                 if return_info:
-                    return self.clip_solution(P.solution), reach_nodes, expand_nodes
+                    return self.clip_solution(P.solution), reach_nodes, expand_nodes, P.anti_direction_counts
                 else: 
                     return self.clip_solution(P.solution)
 
             new_node = deepcopy(P)
             if new_node.priorities.add_priority(conflict.agent_1, conflict.agent_2):
                 if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
+                    new_node.solution, new_node.costs, new_node.anti_direction_counts = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs, new_node.anti_direction_counts)
                     if new_node.solution:
                         new_node.cost = self.compute_solution_cost(new_node.costs)
                         open_set += [new_node]
@@ -223,7 +225,7 @@ class PBS:
 
             if new_node.priorities.add_priority(conflict.agent_2, conflict.agent_1):
                 if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
+                    new_node.solution, new_node.costs, new_node.anti_direction_counts = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs, new_node.anti_direction_counts)
                     if new_node.solution:
                         new_node.cost = self.compute_solution_cost(new_node.costs)
                         open_set += [new_node]
@@ -231,7 +233,7 @@ class PBS:
 
         print("No solution found.")
         if return_info:
-            return {}, 0, 0 
+            return {}, 0, 0, {}
         else: 
             return {}
 
@@ -244,11 +246,11 @@ class PBS:
         open_set = []
         closed_set = set()
         start = HighLevelNode()
-        start.solution, start.costs = self.compute_solution(agents, start.priorities, {}, {})
+        start.solution, start.costs, start.anti_direction_counts = self.compute_solution(agents, start.priorities, {}, {}, {})
         
         if not start.solution:
             if return_info:
-                return {}, 0, 0 
+                return {}, 0, 0, {} 
             else: 
                 return {}
         start.cost = self.compute_solution_cost(start.costs)
@@ -284,14 +286,14 @@ class PBS:
 
             if not conflict:
                 if return_info:
-                    return self.clip_solution(P.solution), reach_nodes, expand_nodes
+                    return self.clip_solution(P.solution), reach_nodes, expand_nodes, P.anti_direction_counts
                 else: 
                     return self.clip_solution(P.solution)
 
             new_node = deepcopy(P)
             if new_node.priorities.add_priority(conflict.agent_1, conflict.agent_2):
                 if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
+                    new_node.solution, new_node.costs, new_node.anti_direction_counts = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs, new_node.anti_direction_counts)
                     if new_node.solution:
                         new_node.cost = self.compute_solution_cost(new_node.costs)
                         open_set += [new_node]
@@ -301,7 +303,7 @@ class PBS:
 
             if new_node.priorities.add_priority(conflict.agent_2, conflict.agent_1):
                 if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
+                    new_node.solution, new_node.costs, new_node.anti_direction_counts = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs, new_node.anti_direction_counts)
                     if new_node.solution:
                         new_node.cost = self.compute_solution_cost(new_node.costs)
                         open_set += [new_node]
@@ -309,7 +311,7 @@ class PBS:
 
         print("No solution found.")
         if return_info:
-            return {}, 0, 0 
+            return {}, 0, 0, {} 
         else: 
             return {}
     
@@ -322,11 +324,11 @@ class PBS:
         open_set = set()
         closed_set = set()
         start = HighLevelNode()
-        start.solution, start.costs = self.compute_solution(agents, start.priorities, {}, {})
+        start.solution, start.costs, start.anti_direction_counts = self.compute_solution(agents, start.priorities, {}, {}, {})
         
         if not start.solution:
             if return_info:
-                return {}, 0, 0 
+                return {}, 0, 0, {} 
             else: 
                 return {}
         start.cost = self.compute_solution_cost(start.costs)
@@ -346,16 +348,16 @@ class PBS:
 
             if not conflict:
                 if return_info:
-                    return self.clip_solution(P.solution), reach_nodes, expand_nodes
+                    return self.clip_solution(P.solution), reach_nodes, expand_nodes, P.anti_direction_counts
                 else: 
                     return self.clip_solution(P.solution)
 
             new_node = deepcopy(P)
             if new_node.priorities.add_priority(conflict.agent_1, conflict.agent_2):
                 if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
+                    new_node.solution, new_node.costs, new_node.anti_direction_counts = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs, new_node.anti_direction_counts)
                     if new_node.solution:
-                        new_node.cost = self.compute_solution_cost(new_node.costs)
+                        
                         open_set |= {new_node}
                         expand_nodes += 1
 
@@ -363,7 +365,7 @@ class PBS:
 
             if new_node.priorities.add_priority(conflict.agent_2, conflict.agent_1):
                 if new_node not in closed_set:
-                    new_node.solution, new_node.costs = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs)
+                    new_node.solution, new_node.costs, new_node.anti_direction_counts = self.compute_solution(agents, new_node.priorities, new_node.solution, new_node.costs, new_node.anti_direction_counts)
                     if new_node.solution:
                         new_node.cost = self.compute_solution_cost(new_node.costs)
                         open_set |= {new_node}
@@ -371,7 +373,7 @@ class PBS:
 
         print("No solution found.")
         if return_info:
-            return {}, 0, 0 
+            return {}, 0, 0, {} 
         else: 
             return {}
 
@@ -383,28 +385,34 @@ class PBS:
 
     def get_neighbors(self, state, agent, constraints):
         neighbors = []
+        step_costs = []
 
         # Wait action
         n = State(state.time + 1, state.location)
         if self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_wait)
         # Up action
         n = State(state.time + 1, Location(state.location.x, state.location.y+1))
         if self.map.grid[state.location.y][state.location.x].grid_property.is_up and self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_up)
         # Down action
         n = State(state.time + 1, Location(state.location.x, state.location.y-1))
         if self.map.grid[state.location.y][state.location.x].grid_property.is_down and self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_down)
         # Left action
         n = State(state.time + 1, Location(state.location.x-1, state.location.y))
         if self.map.grid[state.location.y][state.location.x].grid_property.is_left and self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_left)
         # Right action
         n = State(state.time + 1, Location(state.location.x+1, state.location.y))
         if self.map.grid[state.location.y][state.location.x].grid_property.is_right and self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
-        return neighbors
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_right)
+        return neighbors, step_costs
     
     def get_first_conflict(self, solution):
         max_t = max([len(plan) for plan in solution.values()])
@@ -483,15 +491,16 @@ class PBS:
     def is_at_goal(self, state, agent):
         return state.location == agent.goal
     
-    def compute_solution(self, agents, priorities, solution = {}, cost = {}):
+    def compute_solution(self, agents, priorities, solution = {}, cost = {}, anti_direction_count = {}):
         if not solution:
             agents_without_priorities = list(agents.keys())
             for agent_name in agents_without_priorities:
-                local_solution, local_cost = self.astar(agents[agent_name], Constraints())
+                local_solution, local_cost, local_anti_direction_count = self.astar(agents[agent_name], Constraints())
                 if not local_solution:
-                    return False
+                    return None, None, None
                 solution[agent_name] = local_solution
                 cost[agent_name] = local_cost
+                anti_direction_count[agent_name] = local_anti_direction_count
 
         constraints_dict = {}
         for agent_name in priorities.priority_list:
@@ -500,13 +509,14 @@ class PBS:
             constraints = Constraints()
             for i in priorities.priorities_reverse.get(agent_name, []):
                 constraints.add_constraint(constraints_dict[i])
-            local_solution, local_cost = self.astar(agents[agent_name], constraints)
+            local_solution, local_cost, local_anti_direction_count = self.astar(agents[agent_name], constraints)
             if not local_solution:
-                return None, None
+                return None, None, None
             solution[agent_name] = local_solution
             cost[agent_name] = local_cost
+            anti_direction_count[agent_name] = local_anti_direction_count
             self.add_constraint_from_solution(agent_name, local_solution, constraints_dict[agent_name])
-        return solution, cost
+        return solution, cost, anti_direction_count
     
     def compute_solution_cost(self, costs):
         return sum(list(costs.values()))
@@ -540,7 +550,6 @@ class PBS:
         low level search 
         """
         initial_state = State(0, agent.location)
-        step_cost = 1
         
         closed_set = set()
         open_set = PrioritySet()
@@ -551,40 +560,45 @@ class PBS:
         g_score[initial_state] = 0
 
         f_score = {} 
-
         f_score[initial_state] = self.admissible_heuristic(initial_state, agent)
+
+        anti_direction_count = {}
+        anti_direction_count[initial_state] = 0
 
         open_set.add(initial_state, (f_score[initial_state], g_score[initial_state], initial_state.location.x, initial_state.location.y))
 
         while open_set.set:
             current = open_set.pop()
 
-            if self.is_at_goal(current, agent) or (not self.plan_full_paths and g_score.setdefault(current, float(-1)) >= self.window_size):
-                return self.reconstruct_path(came_from, current), f_score[current]
+            if self.is_at_goal(current, agent) or (not self.plan_full_paths and current.time >= self.window_size):
+                return self.reconstruct_path(came_from, current), f_score[current], anti_direction_count[current]
 
             closed_set |= {current}
 
-            neighbor_list = self.get_neighbors(current, agent, constraints)
+            neighbor_list, step_cost_list = self.get_neighbors(current, agent, constraints)
 
-            for neighbor in neighbor_list:
+            for neighbor, step_cost in zip(neighbor_list, step_cost_list):
                 if neighbor in closed_set:
                     continue
-                
-                tentative_g_score = g_score.setdefault(current, float("inf")) + step_cost
+
+                # step cost != None if moving against highway direction
+                # So, step cost == 1 if the step cost is None. (not an anti-highway-movement)
+                tentative_g_score = g_score[current] + (step_cost if step_cost and self.inflate_g_value else 1)
 
                 if neighbor not in open_set.set:
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g_score
                     f_score[neighbor] = g_score[neighbor] + self.admissible_heuristic(neighbor, agent)
-                    open_set.add(neighbor, (f_score[neighbor], g_score[neighbor], neighbor.location.x, neighbor.location.y))
-                    
+                    open_set.add(neighbor, (f_score[neighbor], -neighbor.time, neighbor.location.x, neighbor.location.y))
+                    anti_direction_count[neighbor] = (anti_direction_count[current] + 1) if step_cost and neighbor.time<=self.buffer_size else anti_direction_count[current]
                 elif tentative_g_score < g_score.setdefault(neighbor, float("inf")):
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g_score
                     f_score[neighbor] = g_score[neighbor] + self.admissible_heuristic(neighbor, agent)
-                    open_set.update(neighbor, (f_score[neighbor], g_score[neighbor], neighbor.location.x, neighbor.location.y))
+                    open_set.update(neighbor, (f_score[neighbor], -neighbor.time, neighbor.location.x, neighbor.location.y))
+                    anti_direction_count[neighbor] = (anti_direction_count[current] + 1) if step_cost and neighbor.time<=self.buffer_size else anti_direction_count[current]
 
-        return None, None
+        return None, None, None
 
 
 def read_input_file(input):
@@ -714,19 +728,18 @@ def main():
     ITERATIONS = 50
 
     if args.use_highway_heuristic:
+        abstract_distance_map = map.get_distance_map()
         map.fit_corridors(corridors)
         heuristic_distance_map = map.get_distance_map(args.highway_heuristic_setup)
-        abstract_distance_map = heuristic_distance_map
-        map.reset()
+        map.reset_direction_limitation()
     else:
-        heuristic_distance_map = map.get_distance_map()
-        abstract_distance_map = heuristic_distance_map
+        abstract_distance_map = map.get_distance_map()
+        heuristic_distance_map = abstract_distance_map
 
     pbs = PBS(map, WINDOW_SIZE, BUFFER_SIZE, args.use_manhat, heuristic_distance_map, abstract_distance_map)
 
     # map.fit_corridors(corridors)
 
-    cost = []
     time_total = 0.0
     finished_tasks = 0
 

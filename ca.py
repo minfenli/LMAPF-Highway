@@ -1,11 +1,7 @@
 import argparse
-from os import stat
-from re import S
 import yaml
 from map import Location, Map, Agent, Corridor, PrioritySet
 from math import fabs
-from copy import deepcopy
-from itertools import combinations
 from random import shuffle, seed
 from numpy.random import shuffle as shffle_v2
 from numpy.random import seed as seed_v2
@@ -104,34 +100,8 @@ class Constraints:
         return "VC: " + str([str(vc) for vc in self.vertex_constraints])  + \
             "EC: " + str([str(ec) for ec in self.edge_constraints])
 
-# class Stack:
-#     def __init__(self):
-#         self.list = []
-
-#     def pop(self, index=-1):
-#         return self.list.pop(index)
-
-#     def push(self, node):
-#         self.list.append(node)
-
-#     def push_by_priority(self, node):
-#         if len(self.list):
-#             idx = -1 
-#             while(len(node.priorities.priority_list) == len(self.list[idx].priorities.priority_list)):   
-#                 if node.cost == self.list[idx].cost:
-#                     if node.priorities.priority_list < self.list[idx].priorities.priority_list:
-#                         break
-#                 elif node.cost < self.list[idx].cost:
-#                     break
-#                 idx -= 1
-#                 if -idx > len(self.list):
-#                     break
-#             self.list.insert(idx, node)
-#         else:
-#             self.list.append(node)
-
 class CA:
-    def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, heuristic_distance_map=None, abstract_distance_map=None):
+    def __init__(self, map, window_size = 20, buffer_size = 10, use_manhat = True, heuristic_distance_map=None, abstract_distance_map=None, inflate_g_value=False):
         self.map = map
         self.window_size = window_size
         self.buffer_size = buffer_size
@@ -139,10 +109,9 @@ class CA:
         self.use_manhat = use_manhat
         self.heuristic_distance_map = heuristic_distance_map # Valid if "use_manhat is False"
         self.abstract_distance_map = abstract_distance_map   # Valid if "use_manhat is False"
+        self.inflate_g_value = inflate_g_value
         self.shffle = shffle_v2
         seed_v2(0)
-            # for i in self.distance_map[:][::-1][0][0]: print(i)
-            # import pdb; pdb.set_trace()
     
     def search(self, agents, time_limit=60, return_info=False):
         reach_nodes = 0
@@ -152,14 +121,17 @@ class CA:
 
         priorities = [agent for agent in agents]
 
-        while (time.time()-time_start) < time_limit:
+        while True:
+            if (time.time()-time_start) >= time_limit:
+                print("Time out.")
+                break
             reach_nodes += 1
             expand_nodes += 1
-            solution = self.compute_solution(agents, priorities)
+            solution, anti_direction_counts = self.compute_solution(agents, priorities)
 
             if solution:
                 if return_info:
-                    return self.clip_solution(solution), reach_nodes, expand_nodes
+                    return self.clip_solution(solution), reach_nodes, expand_nodes, anti_direction_counts
                 else: 
                     return self.clip_solution(solution)
             
@@ -167,7 +139,7 @@ class CA:
 
         print("No solution found.")
         if return_info:
-            return {}, 0, 0 
+            return {}, 0, 0, {} 
         else: 
             return {}
 
@@ -176,48 +148,43 @@ class CA:
             end = min(len(path), self.buffer_size+1)
             solution[agent_name] = path[:end]
         return solution
-    
-    def print_solution(self, solution):
-        for agent_name, path in solution.items():
-            print(agent_name + ":")
-            for step in path:
-                print(step)
-        return solution
 
     def get_neighbors(self, state, agent, constraints):
         neighbors = []
+        step_costs = []
 
         # Wait action
         n = State(state.time + 1, state.location)
         if self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_wait)
         # Up action
         n = State(state.time + 1, Location(state.location.x, state.location.y+1))
         if self.map.grid[state.location.y][state.location.x].grid_property.is_up and self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_up)
         # Down action
         n = State(state.time + 1, Location(state.location.x, state.location.y-1))
         if self.map.grid[state.location.y][state.location.x].grid_property.is_down and self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_down)
         # Left action
         n = State(state.time + 1, Location(state.location.x-1, state.location.y))
         if self.map.grid[state.location.y][state.location.x].grid_property.is_left and self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_left)
         # Right action
         n = State(state.time + 1, Location(state.location.x+1, state.location.y))
         if self.map.grid[state.location.y][state.location.x].grid_property.is_right and self.state_valid(n, constraints.vertex_constraints, self.is_at_goal(state, agent)) and self.transition_valid(state, n, constraints.edge_constraints):
             neighbors.append(n)
-        return neighbors
-    
-    def state_wait(self, state):
-        return State(state.time + 1, state.location)
+            step_costs.append(self.map.grid[state.location.y][state.location.x].grid_property.step_cost_right)
+        return neighbors, step_costs
     
     def get_state(self, agent_name, solution, t):
         if t < len(solution[agent_name]):
             return solution[agent_name][t]
         else:
             return solution[agent_name][-1]
-
     
     def location_in_vertex_constraint_after_time(self, constraints, state):
         for v in constraints:
@@ -259,16 +226,17 @@ class CA:
     
     def compute_solution(self, agents, priorities):
         solution = {}
+        anti_direction_count = {}
 
         constraints = Constraints()
         for agent_name in priorities:
-            local_solution, local_cost = self.astar(agents[agent_name], constraints)
+            local_solution, local_cost, local_anti_direction_count = self.astar(agents[agent_name], constraints)
             if not local_solution:
-                return None
+                return None, None
             solution[agent_name] = local_solution
+            anti_direction_count[agent_name] = local_anti_direction_count
             self.add_constraint_from_solution(agent_name, local_solution, constraints)
-        # print(local_cost)
-        return solution
+        return solution, anti_direction_count
     
     def compute_solution_cost(self, costs):
         return sum(list(costs.values()))
@@ -298,12 +266,10 @@ class CA:
             constraints.vertex_constraints |= {v_constraint}
 
     def astar(self, agent, constraints):
-        # print(constraints)
         """
         low level search 
         """
         initial_state = State(0, agent.location)
-        step_cost = 1
         
         closed_set = set()
         open_set = PrioritySet()
@@ -314,53 +280,43 @@ class CA:
         g_score[initial_state] = 0
 
         f_score = {} 
-
         f_score[initial_state] = self.admissible_heuristic(initial_state, agent)
+
+        anti_direction_count = {}
+        anti_direction_count[initial_state] = 0
 
         open_set.add(initial_state, (f_score[initial_state], g_score[initial_state], initial_state.location.x, initial_state.location.y))
 
         while open_set.set:
             current = open_set.pop()
 
-            if self.is_at_goal(current, agent) or (not self.plan_full_paths and g_score.setdefault(current, float(-1)) >= self.window_size):
-
-                # if (agent.name == "agent5") and agent.goal.x == 8 and agent.goal.y == 6:
-                #     with open("./log1.txt", "a+") as f:
-                #         f.write("  agent5"+str(agent.location)+"\n")
-                #         print("  agent5"+str(agent.location)+"\n")
-                #         for i in self.reconstruct_path_full(came_from, current):
-                #             f.write(str(i)+'\n')
-                #         f.write(str(constraints)+'\n')
-                #         print(constraints)
-                # if (agent.name == "agent5" and agent.location == Location(4,3)):
-                #     print(agent.goal, agent.location)
-                #     print(f_score[current], g_score[current])
-                #     self.reconstruct_path_print(came_from, current)
-                return self.reconstruct_path(came_from, current), f_score[current]
+            if self.is_at_goal(current, agent) or (not self.plan_full_paths and current.time >= self.window_size):
+                return self.reconstruct_path(came_from, current), f_score[current], anti_direction_count[current]
 
             closed_set |= {current}
 
-            neighbor_list = self.get_neighbors(current, agent, constraints)
+            neighbor_list, step_cost_list = self.get_neighbors(current, agent, constraints)
 
-            for neighbor in neighbor_list:
+            for neighbor, step_cost in zip(neighbor_list, step_cost_list):
                 if neighbor in closed_set:
                     continue
                 
-                tentative_g_score = g_score.setdefault(current, float("inf")) + step_cost
+                tentative_g_score = g_score[current] + (step_cost if step_cost and self.inflate_g_value else 1)
 
                 if neighbor not in open_set.set:
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g_score
                     f_score[neighbor] = g_score[neighbor] + self.admissible_heuristic(neighbor, agent)
-                    open_set.add(neighbor, (f_score[neighbor], g_score[neighbor], neighbor.location.x, neighbor.location.y))
-                    
+                    open_set.add(neighbor, (f_score[neighbor], -neighbor.time, neighbor.location.x, neighbor.location.y))
+                    anti_direction_count[neighbor] = (anti_direction_count[current] + 1) if step_cost and neighbor.time<=self.window_size else anti_direction_count[current]
                 elif tentative_g_score < g_score.setdefault(neighbor, float("inf")):
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g_score
                     f_score[neighbor] = g_score[neighbor] + self.admissible_heuristic(neighbor, agent)
-                    open_set.update(neighbor, (f_score[neighbor], g_score[neighbor], neighbor.location.x, neighbor.location.y))
+                    open_set.update(neighbor, (f_score[neighbor], -neighbor.time, neighbor.location.x, neighbor.location.y))
+                    anti_direction_count[neighbor] = (anti_direction_count[current] + 1) if step_cost and neighbor.time<=self.window_size else anti_direction_count[current]
 
-        return None, None
+        return None, None, None
 
 
 def read_input_file(input):
@@ -491,16 +447,13 @@ def main():
     ITERATIONS = 50
 
     if args.use_highway_heuristic:
+        abstract_distance_map = map.get_distance_map()
         map.fit_corridors(corridors)
         heuristic_distance_map = map.get_distance_map(args.highway_heuristic_setup)
-        abstract_distance_map = heuristic_distance_map  # grid_map.get_distance_map() if highway_heuristic_setup else heuristic_distance_map
-        map.reset()
-        # for row in heuristic_distance_map[0][0]: print(row)
-        # if not highway_heuristic_setup:
-        #     import pdb; pdb.set_trace()
+        map.reset_direction_limitation()
     else:
-        heuristic_distance_map = map.get_distance_map()
-        abstract_distance_map = heuristic_distance_map
+        abstract_distance_map = map.get_distance_map()
+        heuristic_distance_map = abstract_distance_map
 
     pbs = CA(map, WINDOW_SIZE, BUFFER_SIZE, args.use_manhat, heuristic_distance_map, abstract_distance_map)
 
@@ -519,8 +472,6 @@ def main():
         time_end = time.time()
         print("computing time: ", time_end - time_start)
         time_total += time_end - time_start
-        
-        # cost.append(pbs.compute_solution_cost(solution))
 
         # 3. Save the paths of agents.
         for agent_name, history in solution.items():
@@ -530,7 +481,6 @@ def main():
         # 4. Assign tasks to the agents that have finished their tasks.
         finished_agents = []
         for agent_name, agent in agents.items():
-            # print(agent)
             last_history = agent_history[agent_name][-1]
             agent.location = last_history.location
             if(agent.location == agent.goal):
@@ -550,7 +500,6 @@ def main():
 
     output = {} 
     output["schedule"] = agent_history
-    # output["cost"] = cost
     with open(args.output, 'w+') as output_yaml:
         yaml.safe_dump(output, output_yaml)
 

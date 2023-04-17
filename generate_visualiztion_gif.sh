@@ -1,0 +1,3 @@
+python visualize.py ./map/square10233_a40.yaml ./history/PBS_10_2_3_3_1_0_a40_window5_soft_N/episode69_output.yaml --time_limit=20 --video=./history/soft_highway.gif
+python visualize.py ./map/square10233_a40.yaml ./history/PBS_10_2_3_3_1_0_a40_window5_strict_N/episode69_output.yaml --time_limit=20 --video=./history/strict_highway.gif
+python visualize.py ./map/square10233_a40.yaml ./history/PBS_10_2_3_3_1_0_a40_window5_none_N/episode69_output.yaml --time_limit=20 --video=./history/no_highway.gif

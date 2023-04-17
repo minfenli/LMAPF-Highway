@@ -63,7 +63,7 @@ class Environment:
         if self.highway_type == "strict":
             self.mapf_solver.map.fit_corridors(self.corridors)
         else:
-            self.map.reset()
+            self.map.reset_direction_limitation()
 
     def reset_corridors(self):
         for corridor, direction in zip(self.corridors, self.corridor_direction_defaults):
@@ -86,13 +86,15 @@ class Environment:
             self.reset_corridors()
             self.mapf_solver.map.fit_corridors(self.corridors)
         else:
-            self.map.reset()
+            self.map.reset_direction_limitation()
     
     def step(self, time_step=0):
         update_agent_goal_dict(self.agents, self.agent_goal, time_step)
 
         update_agent_corridor_direction(self.corridors, self.corridor_direction, time_step)
-        solution, reach_nodes, expand_nodes = self.mapf_solver.search(self.agents, return_info=True) 
+        solution, reach_nodes, expand_nodes, anti_direction_counts = self.mapf_solver.search(self.agents, return_info=True) 
+        anti_direction_timesteps = [v for v in anti_direction_counts.values()] if solution else []
+        # print(anti_direction_counts)
 
         update_agent_idle_and_movesteps(solution, self.agent_idlesteps, self.agent_movesteps, self.mapf_solver.buffer_size)
         
@@ -129,7 +131,7 @@ class Environment:
         self.total_forward_distance += forward_distance
 
         no_solution_in_time = False if solution else True
-        return finished_tasks, reroute_agents, no_solution_in_time, reach_nodes, expand_nodes, finished_idle_timesteps, finished_moving_timesteps, finished_detour_distances
+        return finished_tasks, reroute_agents, no_solution_in_time, reach_nodes, expand_nodes, anti_direction_timesteps, finished_idle_timesteps, finished_moving_timesteps, finished_detour_distances
      
     def output_yaml_history(self, directory: Str, output_filename: Str):
         # Output History
@@ -149,12 +151,22 @@ class Environment:
         if not self.highway_type == "none":
             output["direction"] = self.corridor_direction
 
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+        try:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+        except:
+            pass
 
         directory = directory + '/' + self.name + '/'
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+        
+        try:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+        except:
+            pass
 
-        with open(directory + output_filename, 'w+') as output_yaml:
-            yaml.safe_dump(output, output_yaml)
+        try:
+            with open(directory + output_filename, 'w+') as output_yaml:
+                yaml.safe_dump(output, output_yaml)
+        except:
+            pass
